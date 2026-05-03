@@ -29,3 +29,9 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera) {
 		}
 	}
 }
+
+void Map::setTile(int x, int y, int tileID) {
+	if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return;
+
+	tiles[y][x] = tileID;
+}
