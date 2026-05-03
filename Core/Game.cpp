@@ -35,29 +35,35 @@ void Game::run() {
 
 void Game::handleEvents() {
 	SDL_Event e;
+	const Uint8* state = SDL_GetKeyboardState(NULL);
+
 	while (SDL_PollEvent(&e)) {
 		if (e.type == SDL_QUIT) running = false;
 
-		// Start dragging (LEFT mouse)
-		if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+		// Start dragging
+		if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT && state[SDL_SCANCODE_SPACE]) {
 			dragging = true;
 			SDL_GetMouseState(&lastMouseX, &lastMouseY);
 		}
 
-		// Stop dragging
+		// Stop dragging (mouse release)
 		if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
 			dragging = false;
 		}
 
-		// Mouse move while dragging
-		if (e.type == SDL_MOUSEMOTION && dragging) {
+		// Stop dragging (space released)
+		if (e.type == SDL_KEYUP && e.key.keysym.scancode == SDL_SCANCODE_SPACE) {
+			dragging = false;
+		}
+
+		// Dragging movement
+		if (e.type == SDL_MOUSEMOTION && dragging && state[SDL_SCANCODE_SPACE]) {
 			int mouseX, mouseY;
 			SDL_GetMouseState(&mouseX, &mouseY);
 
 			int dx = mouseX - lastMouseX;
 			int dy = mouseY - lastMouseY;
 
-			// Move camera (IMPORTANT: divide by zoom)
 			camera.x -= dx / camera.zoom;
 			camera.y -= dy / camera.zoom;
 
@@ -65,16 +71,13 @@ void Game::handleEvents() {
 			lastMouseY = mouseY;
 		}
 
+		// Scroll
 		if (e.type == SDL_MOUSEWHEEL) {
-			const Uint8* keystate = SDL_GetKeyboardState(NULL);
+			float scrollSpeed = 50.0f;
 
-			float scrollSpeed = 50.0f; // tweak later
-
-			if (keystate[SDL_SCANCODE_LSHIFT] || keystate[SDL_SCANCODE_RSHIFT]) {
-				// Horizontal scroll
+			if (state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT]) {
 				camera.x -= e.wheel.y * scrollSpeed;
 			} else {
-				// Vertical scroll
 				camera.y -= e.wheel.y * scrollSpeed;
 			}
 		}
