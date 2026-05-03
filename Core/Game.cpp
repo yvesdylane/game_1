@@ -4,6 +4,7 @@
 
 #include "Game.h"
 #include <iostream>
+#include <SDL2/SDL_image.h>
 
 bool Game::init() {
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return false;
@@ -11,10 +12,18 @@ bool Game::init() {
 	window = SDL_CreateWindow("Editor", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
 		SDL_WINDOW_SHOWN);
 
+	if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
+		std::cout << "SDL_image init failed: " << IMG_GetError() << std::endl;
+		return false;
+	}
 	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 	camera.x = 0;
 	camera.y = 0;
 	camera.zoom = 1.0f;
+	if (!map.init(renderer)) {
+		std::cout << "Map init failed" << std::endl;
+		return false;
+	}
 
 	return true;
 }
@@ -96,6 +105,7 @@ void Game::render() {
 
 void Game::clean() {
 	SDL_DestroyRenderer(renderer);
+	IMG_Quit();
 	SDL_DestroyWindow(window);
 	SDL_Quit();
 }
