@@ -154,6 +154,15 @@ void Game::render() {
 
     map.render(renderer, camera);
 
+    // Drawing the panel on the right side
+    SDL_Rect panelRect = {
+        screenWidth - panelWidth,
+        0,
+        panelWidth,
+        screenHeight
+    };
+    SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
+    SDL_RenderFillRect(renderer, &panelRect);
     SDL_RenderPresent(renderer);
 }
 

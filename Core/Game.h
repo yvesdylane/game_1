@@ -9,6 +9,9 @@ public:
 	bool init();
 	void run();
 	void clean();
+	int screenWidth = 1280;
+	int screenHeight = 720;
+	int panelWidth = 256;
 
 private:
 	void handleEvents();
