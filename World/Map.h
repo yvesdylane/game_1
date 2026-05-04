@@ -20,9 +20,10 @@ public:
 	bool init(SDL_Renderer* renderer);
 	void render(SDL_Renderer* renderer, const Camera& camera);
 	void setTile(int x, int y, int tileID);
+	TileSet&  getTileSet();
 
 private:
-	int tiles[MAP_HEIGHT][MAP_WIDTH] = {0};
+	int tiles[MAP_HEIGHT][MAP_WIDTH] = {-1};
 	TileSet tileset;
 };
 

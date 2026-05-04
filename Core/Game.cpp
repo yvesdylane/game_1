@@ -123,10 +123,26 @@ void Game::handleEvents() {
         }
 
         // Tile selection
-        if (e.type == SDL_KEYDOWN) {
-            if (e.key.keysym.sym == SDLK_1) selectedTile = 0;
-            if (e.key.keysym.sym == SDLK_2) selectedTile = 1;
-            if (e.key.keysym.sym == SDLK_3) selectedTile = 2;
+        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+
+            int mouseX = e.button.x;
+            int mouseY = e.button.y;
+
+            // Check if click is inside panel
+            if (mouseX >= screenWidth - panelWidth) {
+
+                int localX = mouseX - (screenWidth - panelWidth);
+                int tileSize = 32;
+
+                int tilesPerRow = panelWidth / tileSize;
+
+                int tileX = localX / tileSize;
+                int tileY = mouseY / tileSize;
+
+                selectedTile = tileY * tilesPerRow + tileX;
+
+                return; // VERY IMPORTANT → don’t paint world
+            }
         }
     }
 }
@@ -163,6 +179,37 @@ void Game::render() {
     };
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &panelRect);
+    // Draw the mini tiles
+    TileSet& ts = map.getTileSet();
+
+    int tileSize = 32;
+    int tilePerRow = ts.getTilesPerRow();
+
+    for (int i =0; i < 100; i++) {
+        int x = i % (panelWidth / tileSize);
+        int y = i / (panelWidth / tileSize);
+
+        int drawX = screenWidth - panelWidth + x * tileSize;
+        int drawY = y * tileSize;
+
+        ts.renderTile(renderer, i, drawX, drawY, 0.5f); // smaller scale
+    }
+    // highlighting the selected tile
+    int tilesPerRow = panelWidth / tileSize;
+
+    int selX = selectedTile % tilesPerRow;
+    int selY = selectedTile / tilesPerRow;
+
+    SDL_Rect highlight = {
+        screenWidth - panelWidth + selX * tileSize,
+        selY * tileSize,
+        tileSize,
+        tileSize
+    };
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
+    SDL_RenderDrawRect(renderer, &highlight);
+
     SDL_RenderPresent(renderer);
 }
 

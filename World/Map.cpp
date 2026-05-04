@@ -10,6 +10,7 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera) {
 	for (int y = 0; y < MAP_HEIGHT; y++) {
 		for (int x = 0; x < MAP_WIDTH; x++) {
 			int tileID = tiles[y][x];
+			if (tileID < 0) continue;
 
 			int screenX = static_cast<int>((x * TILE_SIZE - camera.x) * camera.zoom);
 			int screenY = static_cast<int>((y * TILE_SIZE - camera.y) * camera.zoom);
@@ -34,4 +35,8 @@ void Map::setTile(int x, int y, int tileID) {
 	if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return;
 
 	tiles[y][x] = tileID;
+}
+
+TileSet& Map::getTileSet() {
+	return tileset;
 }
