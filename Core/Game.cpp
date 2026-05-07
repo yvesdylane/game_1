@@ -113,12 +113,47 @@ void Game::handleEvents() {
 
         // Scroll movement
         if (e.type == SDL_MOUSEWHEEL) {
+
+            const Uint8* state = SDL_GetKeyboardState(NULL);
+
             float scrollSpeed = 50.0f;
 
+            // HORIZONTAL SCROLL
             if (state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT]) {
                 camera.x -= e.wheel.y * scrollSpeed;
-            } else {
+            }
+
+            // VERTICAL SCROLL
+            else if (state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL]) {
                 camera.y -= e.wheel.y * scrollSpeed;
+            }
+
+            // ZOOM
+            else {
+
+                int mouseX, mouseY;
+                SDL_GetMouseState(&mouseX, &mouseY);
+
+                // Mouse position in world BEFORE zoom
+                float worldXBefore = camera.x + mouseX / camera.zoom;
+                float worldYBefore = camera.y + mouseY / camera.zoom;
+
+                // Smooth exponential zoom
+                if (e.wheel.y > 0) {
+                    camera.zoom *= 1.1f;
+                }
+
+                if (e.wheel.y < 0) {
+                    camera.zoom *= 0.9f;
+                }
+
+                // Clamp zoom
+                if (camera.zoom < 0.2f) camera.zoom = 0.2f;
+                if (camera.zoom > 4.0f) camera.zoom = 4.0f;
+
+                // Recalculate camera so mouse stays fixed
+                camera.x = worldXBefore - mouseX / camera.zoom;
+                camera.y = worldYBefore - mouseY / camera.zoom;
             }
         }
 

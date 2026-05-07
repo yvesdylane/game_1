@@ -27,7 +27,7 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera) {
 			rect.w = static_cast<int>(TILE_SIZE * camera.zoom);
 			rect.h = static_cast<int>(TILE_SIZE * camera.zoom);
 
-			SDL_SetRenderDrawColor(renderer, 50, 150, 50, 255);
+			SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
 			SDL_RenderDrawRect(renderer, &rect);
 			if (tileID < 0) continue;
 
