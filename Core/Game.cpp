@@ -59,7 +59,6 @@ void Game::run() {
 void Game::handleEvents() {
     SDL_Event e;
     const Uint8* state = SDL_GetKeyboardState(NULL);
-    bool clickConsumed = false;
 
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
@@ -85,7 +84,7 @@ void Game::handleEvents() {
 
                 selectedTile = tileY * tilesPerRow + tileX;
 
-                clickConsumed = true;
+                return; // VERY IMPORTANT → don’t paint world
             }
         }
 
@@ -95,7 +94,7 @@ void Game::handleEvents() {
                 // Start camera drag
                 dragging = true;
                 SDL_GetMouseState(&lastMouseX, &lastMouseY);
-            } else if (!clickConsumed) {
+            } else {
                 // Paint tile
                 paintTileAtMouse();
             }
@@ -180,6 +179,7 @@ void Game::handleEvents() {
                 camera.y = worldYBefore - mouseY / camera.zoom;
             }
         }
+
     }
 }
 
