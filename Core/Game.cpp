@@ -59,10 +59,34 @@ void Game::run() {
 void Game::handleEvents() {
     SDL_Event e;
     const Uint8* state = SDL_GetKeyboardState(NULL);
+    bool clickConsumed = false;
 
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
             running = false;
+        }
+
+        // Tile selection
+        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+
+            int mouseX = e.button.x;
+            int mouseY = e.button.y;
+
+            // Check if click is inside panel
+            if (mouseX >= screenWidth - panelWidth) {
+
+                int localX = mouseX - (screenWidth - panelWidth);
+                int tileSize = 32;
+
+                int tilesPerRow = panelWidth / tileSize;
+
+                int tileX = localX / tileSize;
+                int tileY = mouseY / tileSize;
+
+                selectedTile = tileY * tilesPerRow + tileX;
+
+                clickConsumed = true;
+            }
         }
 
         // Mouse click (drag OR paint)
@@ -71,7 +95,7 @@ void Game::handleEvents() {
                 // Start camera drag
                 dragging = true;
                 SDL_GetMouseState(&lastMouseX, &lastMouseY);
-            } else {
+            } else if (!clickConsumed) {
                 // Paint tile
                 paintTileAtMouse();
             }
@@ -154,29 +178,6 @@ void Game::handleEvents() {
                 // Recalculate camera so mouse stays fixed
                 camera.x = worldXBefore - mouseX / camera.zoom;
                 camera.y = worldYBefore - mouseY / camera.zoom;
-            }
-        }
-
-        // Tile selection
-        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
-
-            int mouseX = e.button.x;
-            int mouseY = e.button.y;
-
-            // Check if click is inside panel
-            if (mouseX >= screenWidth - panelWidth) {
-
-                int localX = mouseX - (screenWidth - panelWidth);
-                int tileSize = 32;
-
-                int tilesPerRow = panelWidth / tileSize;
-
-                int tileX = localX / tileSize;
-                int tileY = mouseY / tileSize;
-
-                selectedTile = tileY * tilesPerRow + tileX;
-
-                return; // VERY IMPORTANT → don’t paint world
             }
         }
     }
