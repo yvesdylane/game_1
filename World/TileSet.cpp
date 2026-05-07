@@ -28,8 +28,10 @@ int TileSet::getTilesPerRow() const {
 	return textureWidth / tileSize;
 }
 
-void TileSet::renderTile(SDL_Renderer* renderer, int tileID, int x, int y, float zoom) {
+void TileSet::renderTile(SDL_Renderer* renderer, int tileID, int x, int y, float zoom, Uint8 alpha) {
 	if (!texture) return;
+
+	SDL_SetTextureAlphaMod(texture, alpha);
 
 	int tilesPerRow = getTilesPerRow();
 
@@ -46,4 +48,7 @@ void TileSet::renderTile(SDL_Renderer* renderer, int tileID, int x, int y, float
 	dst.h = static_cast<int>(tileSize * zoom);
 
 	SDL_RenderCopy(renderer, texture, &src, &dst);
+
+	// IMPORTANT: reset alpha
+	SDL_SetTextureAlphaMod(texture, 255);
 }

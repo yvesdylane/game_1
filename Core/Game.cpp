@@ -210,6 +210,36 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
     SDL_RenderDrawRect(renderer, &highlight);
 
+    // Mouse position
+    int mouseX, mouseY;
+    SDL_GetMouseState(&mouseX, &mouseY);
+
+    // Don't preview over side panel
+    if (mouseX < screenWidth - panelWidth) {
+
+        // Convert screen -> world
+        float worldX = camera.x + mouseX / camera.zoom;
+        float worldY = camera.y + mouseY / camera.zoom;
+
+        // Snap to tile grid
+        int tileX = static_cast<int>(worldX / TILE_SIZE);
+        int tileY = static_cast<int>(worldY / TILE_SIZE);
+
+        // Back to screen coordinates
+        int drawX = static_cast<int>((tileX * TILE_SIZE - camera.x) * camera.zoom);
+        int drawY = static_cast<int>((tileY * TILE_SIZE - camera.y) * camera.zoom);
+
+        // Render ghost tile
+        map.getTileSet().renderTile(
+            renderer,
+            selectedTile,
+            drawX,
+            drawY,
+            camera.zoom,
+            150 // transparency
+        );
+    }
+
     SDL_RenderPresent(renderer);
 }
 

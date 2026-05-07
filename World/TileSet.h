@@ -14,7 +14,14 @@
 class TileSet {
 	public:
 		bool load(SDL_Renderer* renderer, const std::string& path, int tileSize);
-		void renderTile(SDL_Renderer* renderer, int tileID, int x, int y, float zoom);
+		void renderTile(
+			SDL_Renderer* renderer,
+			int tileID,
+			int x,
+			int y,
+			float zoom,
+			Uint8 alpha = 255
+			);
 
 		int getTilesPerRow() const;
 

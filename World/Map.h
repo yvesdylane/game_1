@@ -17,6 +17,7 @@ const int TILE_SIZE = 64;
 
 class Map {
 public:
+	Map();
 	bool init(SDL_Renderer* renderer);
 	void render(SDL_Renderer* renderer, const Camera& camera);
 	void setTile(int x, int y, int tileID);
