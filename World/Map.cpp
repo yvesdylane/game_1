@@ -3,9 +3,11 @@
 #include <SDL2/SDL.h>
 
 Map::Map() {
-	for (int y = 0; y < MAP_HEIGHT; y++) {
-		for (int x = 0; x < MAP_WIDTH; x++) {
-			tiles[y][x] = -1;
+	for (int l = 0; l < LAYER_COUNT; l++) {
+		for (int y = 0; y < MAP_HEIGHT; y++) {
+			for (int x = 0; x < MAP_WIDTH; x++) {
+				tiles[l][y][x] = -1;
+			}
 		}
 	}
 }
@@ -15,34 +17,40 @@ bool Map::init(SDL_Renderer* renderer) {
 }
 
 void Map::render(SDL_Renderer* renderer, const Camera& camera) {
-	for (int y = 0; y < MAP_HEIGHT; y++) {
-		for (int x = 0; x < MAP_WIDTH; x++) {
-			int tileID = tiles[y][x];
-			// draw grid to help guid the view
-			SDL_Rect rect;
+	for (int layer = 0; layer < LAYER_COUNT; layer++) {
+		for (int y = 0; y < MAP_HEIGHT; y++) {
+			for (int x = 0; x < MAP_WIDTH; x++) {
+				int tileID = tiles[layer][y][x];
+				// draw grid to help guid the view
+				SDL_Rect rect;
 
-			rect.x = static_cast<int>((x * TILE_SIZE - camera.x) * camera.zoom);
-			rect.y = static_cast<int>((y * TILE_SIZE - camera.y) * camera.zoom);
+				rect.x = static_cast<int>((x * TILE_SIZE - camera.x) * camera.zoom);
+				rect.y = static_cast<int>((y * TILE_SIZE - camera.y) * camera.zoom);
 
-			rect.w = static_cast<int>(TILE_SIZE * camera.zoom);
-			rect.h = static_cast<int>(TILE_SIZE * camera.zoom);
+				rect.w = static_cast<int>(TILE_SIZE * camera.zoom);
+				rect.h = static_cast<int>(TILE_SIZE * camera.zoom);
 
-			SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
-			SDL_RenderDrawRect(renderer, &rect);
-			if (tileID < 0) continue;
+				SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+				SDL_RenderDrawRect(renderer, &rect);
+				if (tileID < 0) continue;
 
-			int screenX = static_cast<int>((x * TILE_SIZE - camera.x) * camera.zoom);
-			int screenY = static_cast<int>((y * TILE_SIZE - camera.y) * camera.zoom);
+				int screenX = static_cast<int>((x * TILE_SIZE - camera.x) * camera.zoom);
+				int screenY = static_cast<int>((y * TILE_SIZE - camera.y) * camera.zoom);
 
-			tileset.renderTile(renderer, tileID, screenX, screenY, camera.zoom);
+				tileset.renderTile(renderer, tileID, screenX, screenY, camera.zoom);
+			}
 		}
 	}
 }
 
-void Map::setTile(int x, int y, int tileID) {
-	if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return;
+void Map::setTile(int layer, int x, int y, int tileID) {
 
-	tiles[y][x] = tileID;
+	if (layer < 0 || layer >= LAYER_COUNT) return;
+
+	if (x < 0 || x >= MAP_WIDTH ||
+		y < 0 || y >= MAP_HEIGHT) return;
+
+	tiles[layer][y][x] = tileID;
 }
 
 TileSet& Map::getTileSet() {

@@ -1,6 +1,7 @@
 #include "Game.h"
 #include <iostream>
 #include <SDL2/SDL_image.h>
+#include "../World/WorldConfig.h"
 
 bool Game::init() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -65,38 +66,51 @@ void Game::handleEvents() {
             running = false;
         }
 
-        // Tile selection
         if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
-
             int mouseX = e.button.x;
             int mouseY = e.button.y;
+            bool clickConsumed = false;
 
-            // Check if click is inside panel
+            // Tile panel (right side)
             if (mouseX >= screenWidth - panelWidth) {
-
                 int localX = mouseX - (screenWidth - panelWidth);
                 int tileSize = 32;
-
                 int tilesPerRow = panelWidth / tileSize;
 
-                int tileX = localX / tileSize;
-                int tileY = mouseY / tileSize;
-
-                selectedTile = tileY * tilesPerRow + tileX;
-
-                return; // VERY IMPORTANT → don’t paint world
+                selectedTile = (mouseY / tileSize) * tilesPerRow + (localX / tileSize);
+                clickConsumed = true;
             }
-        }
 
-        // Mouse click (drag OR paint)
-        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
-            if (state[SDL_SCANCODE_SPACE]) {
-                // Start camera drag
-                dragging = true;
-                SDL_GetMouseState(&lastMouseX, &lastMouseY);
-            } else {
-                // Paint tile
-                paintTileAtMouse();
+            // Bottom bar (layer selection)
+            if (!clickConsumed && mouseY >= screenHeight - bottomBarHeight) {
+                for (int i = 0; i < LAYER_COUNT; i++) {
+                    SDL_Rect layerRect = {
+                        20 + i * 120,
+                        screenHeight - 60,
+                        100,
+                        40
+                    };
+
+                    if (mouseX >= layerRect.x &&
+                        mouseX <= layerRect.x + layerRect.w &&
+                        mouseY >= layerRect.y &&
+                        mouseY <= layerRect.y + layerRect.h) {
+
+                        selectedLayer = i;
+                        clickConsumed = true;
+                        break;
+                    }
+                }
+            }
+
+            // Camera drag or paint
+            if (!clickConsumed) {
+                if (state[SDL_SCANCODE_SPACE]) {
+                    dragging = true;
+                    SDL_GetMouseState(&lastMouseX, &lastMouseY);
+                } else {
+                    paintTileAtMouse();
+                }
             }
         }
 
@@ -112,74 +126,45 @@ void Game::handleEvents() {
 
         // Mouse movement
         if (e.type == SDL_MOUSEMOTION) {
-
-            // Dragging camera
             if (dragging && state[SDL_SCANCODE_SPACE]) {
                 int mouseX, mouseY;
                 SDL_GetMouseState(&mouseX, &mouseY);
 
-                int dx = mouseX - lastMouseX;
-                int dy = mouseY - lastMouseY;
-
-                camera.x -= dx / camera.zoom;
-                camera.y -= dy / camera.zoom;
+                camera.x -= (mouseX - lastMouseX) / camera.zoom;
+                camera.y -= (mouseY - lastMouseY) / camera.zoom;
 
                 lastMouseX = mouseX;
                 lastMouseY = mouseY;
             }
 
-            // Painting while dragging
             if ((e.motion.state & SDL_BUTTON_LMASK) && !state[SDL_SCANCODE_SPACE]) {
                 paintTileAtMouse();
             }
         }
 
-        // Scroll movement
+        // Scroll / zoom
         if (e.type == SDL_MOUSEWHEEL) {
-
-            const Uint8* state = SDL_GetKeyboardState(NULL);
-
             float scrollSpeed = 50.0f;
 
-            // HORIZONTAL SCROLL
             if (state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT]) {
                 camera.x -= e.wheel.y * scrollSpeed;
-            }
-
-            // VERTICAL SCROLL
-            else if (state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL]) {
+            } else if (state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL]) {
                 camera.y -= e.wheel.y * scrollSpeed;
-            }
-
-            // ZOOM
-            else {
-
+            } else {
                 int mouseX, mouseY;
                 SDL_GetMouseState(&mouseX, &mouseY);
 
-                // Mouse position in world BEFORE zoom
                 float worldXBefore = camera.x + mouseX / camera.zoom;
                 float worldYBefore = camera.y + mouseY / camera.zoom;
 
-                // Smooth exponential zoom
-                if (e.wheel.y > 0) {
-                    camera.zoom *= 1.1f;
-                }
-
-                if (e.wheel.y < 0) {
-                    camera.zoom *= 0.9f;
-                }
-
-                // Clamp zoom
+                camera.zoom *= (e.wheel.y > 0) ? 1.1f : 0.9f;
                 if (camera.zoom < 0.2f) camera.zoom = 0.2f;
                 if (camera.zoom > 4.0f) camera.zoom = 4.0f;
 
-                // Recalculate camera so mouse stays fixed
                 camera.x = worldXBefore - mouseX / camera.zoom;
                 camera.y = worldYBefore - mouseY / camera.zoom;
             }
         }
-
     }
 }
 
@@ -193,7 +178,7 @@ void Game::paintTileAtMouse() {
     int tileX = worldX / TILE_SIZE;
     int tileY = worldY / TILE_SIZE;
 
-    map.setTile(tileX, tileY, selectedTile);
+    map.setTile(selectedLayer, tileX, tileY, selectedTile);
 }
 
 void Game::update(float deltaTime) {
@@ -274,6 +259,32 @@ void Game::render() {
             camera.zoom,
             150 // transparency
         );
+    }
+    SDL_Rect bottomBar = {
+        0,
+        screenHeight - bottomBarHeight,
+        screenWidth - panelWidth,
+        bottomBarHeight
+    };
+
+    SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
+    SDL_RenderFillRect(renderer, &bottomBar);
+    for (int i = 0; i < LAYER_COUNT; i++) {
+
+        SDL_Rect layerRect = {
+            20 + i * 120,
+            screenHeight - 60,
+            100,
+            40
+        };
+
+        if (i == selectedLayer) {
+            SDL_SetRenderDrawColor(renderer, 200, 180, 50, 255);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
+        }
+
+        SDL_RenderFillRect(renderer, &layerRect);
     }
 
     SDL_RenderPresent(renderer);

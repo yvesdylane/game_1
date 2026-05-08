@@ -12,6 +12,8 @@ public:
 	int screenWidth = 1280;
 	int screenHeight = 720;
 	int panelWidth = 256;
+	int selectedLayer = 0;
+	int bottomBarHeight = 80;
 
 private:
 	void handleEvents();

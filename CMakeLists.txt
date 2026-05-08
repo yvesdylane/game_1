@@ -14,6 +14,7 @@ add_executable(Game1 main.cpp
         World/Map.h
         World/TileSet.cpp
         World/TileSet.h
+        World/WorldConfig.h
 )
 
 target_include_directories(Game1 PRIVATE

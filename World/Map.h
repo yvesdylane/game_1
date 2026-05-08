@@ -20,11 +20,12 @@ public:
 	Map();
 	bool init(SDL_Renderer* renderer);
 	void render(SDL_Renderer* renderer, const Camera& camera);
-	void setTile(int x, int y, int tileID);
+	void setTile(int layer, int x, int y, int tileID);
 	TileSet&  getTileSet();
 
 private:
-	int tiles[MAP_HEIGHT][MAP_WIDTH] = {-1};
+	static constexpr int LAYER_COUNT = 5;
+	int tiles[LAYER_COUNT][MAP_HEIGHT][MAP_WIDTH];
 	TileSet tileset;
 };
 
