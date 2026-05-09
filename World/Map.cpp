@@ -1,6 +1,10 @@
 #include "Map.h"
 #include "../Rendering/Camera.h"
 #include <SDL2/SDL.h>
+#include <fstream>
+#include <iostream>
+
+using namespace std;
 
 Map::Map() {
 	for (int l = 0; l < LAYER_COUNT; l++) {
@@ -55,4 +59,54 @@ void Map::setTile(int layer, int x, int y, int tileID) {
 
 TileSet& Map::getTileSet() {
 	return tileset;
+}
+
+bool Map::save(const std::string& path) const {
+	std::ofstream file(path, std::ios::binary);
+	if (!file) {
+		std::cout << "Failed to open file for saving: " << path << std::endl;
+		return false;
+	}
+
+	// Write header
+	file.write(reinterpret_cast<const char*>(&MAP_WIDTH),   sizeof(int));
+	file.write(reinterpret_cast<const char*>(&MAP_HEIGHT),  sizeof(int));
+	file.write(reinterpret_cast<const char*>(&LAYER_COUNT), sizeof(int));
+
+	// Write tile data
+	for (int l = 0; l < LAYER_COUNT; l++)
+		for (int y = 0; y < MAP_HEIGHT; y++)
+			for (int x = 0; x < MAP_WIDTH; x++)
+				file.write(reinterpret_cast<const char*>(&tiles[l][y][x]), sizeof(int));
+
+	std::cout << "Map saved to: " << path << std::endl;
+	return true;
+}
+
+bool Map::load(const std::string& path) {
+	std::ifstream file(path, std::ios::binary);
+	if (!file) {
+		std::cout << "Failed to open file for loading: " << path << std::endl;
+		return false;
+	}
+
+	// Read and validate header
+	int savedWidth, savedHeight, savedLayers;
+	file.read(reinterpret_cast<char*>(&savedWidth),  sizeof(int));
+	file.read(reinterpret_cast<char*>(&savedHeight), sizeof(int));
+	file.read(reinterpret_cast<char*>(&savedLayers), sizeof(int));
+
+	if (savedWidth != MAP_WIDTH || savedHeight != MAP_HEIGHT || savedLayers != LAYER_COUNT) {
+		std::cout << "Map file dimensions don't match current config!\n";
+		return false;
+	}
+
+	// Read tile data
+	for (int l = 0; l < LAYER_COUNT; l++)
+		for (int y = 0; y < MAP_HEIGHT; y++)
+			for (int x = 0; x < MAP_WIDTH; x++)
+				file.read(reinterpret_cast<char*>(&tiles[l][y][x]), sizeof(int));
+
+	std::cout << "Map loaded from: " << path << std::endl;
+	return true;
 }

@@ -22,6 +22,8 @@ public:
 	void render(SDL_Renderer* renderer, const Camera& camera);
 	void setTile(int layer, int x, int y, int tileID);
 	TileSet&  getTileSet();
+	bool save(const std::string& path) const;
+	bool load(const std::string& path);
 
 private:
 	static constexpr int LAYER_COUNT = 5;

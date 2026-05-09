@@ -66,6 +66,16 @@ void Game::handleEvents() {
             running = false;
         }
 
+        // Save / Load
+        if (e.type == SDL_KEYDOWN) {
+            if (e.key.keysym.scancode == SDL_SCANCODE_S && state[SDL_SCANCODE_LCTRL]) {
+                map.save("../Maps/level1.map");
+            }
+            if (e.key.keysym.scancode == SDL_SCANCODE_L && state[SDL_SCANCODE_LCTRL]) {
+                map.load("../Maps/level1.map");
+            }
+        }
+
         if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mouseX = e.button.x;
             int mouseY = e.button.y;
