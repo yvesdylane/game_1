@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 find_package(SDL2 REQUIRED)
 find_package(SDL2_image REQUIRED)
+find_package(SDL2_ttf REQUIRED)
 
 add_executable(Game1 main.cpp
         Core/Game.cpp
@@ -15,6 +16,13 @@ add_executable(Game1 main.cpp
         World/TileSet.cpp
         World/TileSet.h
         World/WorldConfig.h
+        World/TileDefinition.h
+        World/TileLibrary.cpp
+        World/TileLibrary.h
+        Rendering/TileRenderer.h
+        Rendering/TileRenderer.cpp
+        Rendering/TextRenderer.cpp
+        Rendering/TextRenderer.h
 )
 
 target_include_directories(Game1 PRIVATE
@@ -24,4 +32,5 @@ target_include_directories(Game1 PRIVATE
 target_link_libraries(Game1
         SDL2
         SDL2_image
+        SDL2_ttf
 )
