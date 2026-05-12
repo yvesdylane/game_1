@@ -15,24 +15,58 @@ enum class EditorMode {
     TilesetEditor  // importing a new image + picking tiles
 };
 
-// ── Tileset editor state ──────────────────────────────────────────────────────
+enum class TilesetEditorMode {
+    SingleObject,  // whole image = one tile
+    GridUniform,   // square tiles, scroll to resize
+    GridManual     // manual W/H input via keyboard
+};
+
 struct TilesetEditorState {
-    std::string     imagePath;
-    int             imageW      = 0;
-    int             imageH      = 0;
-    int             tileW       = 64;   // user-chosen tile width
-    int             tileH       = 64;   // user-chosen tile height
-    TileCategory    category    = TileCategory::Terrain;
-    // true = user wants to include this tile
+    std::string      imagePath;
+    int              imageW       = 0;
+    int              imageH       = 0;
+    int              tileW        = 64;
+    int              tileH        = 64;
+    TileCategory     category     = TileCategory::Terrain;
+    TilesetEditorMode mode        = TilesetEditorMode::GridUniform;
     std::vector<bool> included;
 
-    int cols() const { return imageW / tileW; }
-    int rows() const { return imageH / tileH; }
+    // Manual input state
+    enum class FocusedField { None, Width, Height };
+    FocusedField focused  = FocusedField::None;
+    std::string  inputW   = "64";
+    std::string  inputH   = "64";
+
+    int cols() const {
+        if (mode == TilesetEditorMode::SingleObject) return 1;
+        return std::max(1, imageW / tileW);
+    }
+    int rows() const {
+        if (mode == TilesetEditorMode::SingleObject) return 1;
+        return std::max(1, imageH / tileH);
+    }
     int count() const { return cols() * rows(); }
 
     void reset(int w, int h, int tw, int th) {
-        imageW = w; imageH = h; tileW = tw; tileH = th;
+        imageW = w; imageH = h;
+        tileW  = tw; tileH = th;
+        inputW = std::to_string(tw);
+        inputH = std::to_string(th);
         included.assign(count(), false);
+    }
+
+    void applyManualInput() {
+        try {
+            int w = std::max(8, std::stoi(inputW));
+            int h = std::max(8, std::stoi(inputH));
+
+            // ✅ Only reset grid if size actually changed
+            if (w != tileW || h != tileH) {
+                tileW = w;
+                tileH = h;
+                included.assign(count(), false);
+            }
+        } catch (...) {}
     }
 };
 

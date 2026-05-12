@@ -16,13 +16,16 @@ bool Game::init() {
         screenWidth, screenHeight, SDL_WINDOW_SHOWN);
     if (!window) { std::cout << "Window failed\n"; return false; }
     std::cout << "[3] window ok\n" << std::flush;
+
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) { std::cout << "Renderer failed\n"; return false; }
     std::cout << "[4] renderer ok\n" << std::flush;
+
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
         std::cout << "IMG_Init failed: " << IMG_GetError() << "\n";
         return false;
     }
+    std::cout << "[5] IMG ok\n" << std::flush;
 
     if (!textRenderer.load("../Assets/Fonts/DejaVuSans.ttf", 13)) {
         std::cout << "Font load failed\n";
@@ -30,18 +33,19 @@ bool Game::init() {
     }
     std::cout << "[5b] font ok\n" << std::flush;
 
-    std::cout << "[5] IMG ok\n" << std::flush;
     camera = {0, 0, 1.0f};
 
     if (!map.init(renderer)) { std::cout << "Map init failed\n"; return false; }
     std::cout << "[6] map ok\n" << std::flush;
-    // Load saved library if it exists
+
     tileLibrary.load("../Assets/Tilesets/library.tileset");
     std::cout << "[7] library load attempted\n" << std::flush;
+
     // Pre-load textures for all known tiles
     for (const auto& def : tileLibrary.all())
         tileRenderer.loadTexture(renderer, def.imagePath);
     std::cout << "[8] textures loaded\n" << std::flush;
+
     return true;
 }
 
@@ -76,53 +80,163 @@ void Game::handleEvents() {
                 int mx = e.button.x;
                 int my = e.button.y;
 
-                // Hit-test: is the click inside the image grid area?
-                // We render the image starting at (10, 60) in the overlay
-                const int gridOffX = 10;
-                const int gridOffY = 60;
-                float previewZoom  = 0.5f;
-                int cellW = static_cast<int>(tsEditor.tileW * previewZoom);
-                int cellH = static_cast<int>(tsEditor.tileH * previewZoom);
+                // ── Mode selector buttons ─────────────────────────────────────
+                SDL_Rect modeSingle = {10,  45, 120, 26};
+                SDL_Rect modeGrid   = {140, 45, 120, 26};
+                SDL_Rect modeManual = {270, 45, 130, 26};
 
-                int col = (mx - gridOffX) / cellW;
-                int row = (my - gridOffY) / cellH;
-
-                if (col >= 0 && col < tsEditor.cols() &&
-                    row >= 0 && row < tsEditor.rows()) {
-                    int idx = row * tsEditor.cols() + col;
-                    if (idx < (int)tsEditor.included.size())
-                        tsEditor.included[idx] = !tsEditor.included[idx];
+                if (mx >= modeSingle.x && mx <= modeSingle.x + modeSingle.w &&
+                    my >= modeSingle.y && my <= modeSingle.y + modeSingle.h) {
+                    tsEditor.mode = TilesetEditorMode::SingleObject;
+                    tsEditor.included.assign(1, false);
+                    SDL_StopTextInput();
+                    tsEditor.focused = TilesetEditorState::FocusedField::None;
+                }
+                else if (mx >= modeGrid.x && mx <= modeGrid.x + modeGrid.w &&
+                         my >= modeGrid.y && my <= modeGrid.y + modeGrid.h) {
+                    tsEditor.mode = TilesetEditorMode::GridUniform;
+                    tsEditor.included.assign(tsEditor.count(), false);
+                    SDL_StopTextInput();
+                    tsEditor.focused = TilesetEditorState::FocusedField::None;
+                }
+                else if (mx >= modeManual.x && mx <= modeManual.x + modeManual.w &&
+                         my >= modeManual.y && my <= modeManual.y + modeManual.h) {
+                    tsEditor.mode = TilesetEditorMode::GridManual;
+                    tsEditor.included.assign(tsEditor.count(), false);
                 }
 
-                // "Save" button — placed at bottom of overlay
-                SDL_Rect saveBtn = {10, screenHeight - 50, 120, 36};
+                // ── Save / Cancel checked BEFORE field focus logic ────────────
+                // This prevents the "click outside = lose focus + reset" branch
+                // from wiping included[] when Save is clicked.
+                SDL_Rect saveBtn   = {10,  screenHeight - 50, 120, 36};
+                SDL_Rect cancelBtn = {140, screenHeight - 50, 100, 36};
+                bool clickedButton = false;
+
                 if (mx >= saveBtn.x && mx <= saveBtn.x + saveBtn.w &&
                     my >= saveBtn.y && my <= saveBtn.y + saveBtn.h) {
+                    clickedButton = true;
+                    tsEditor.applyManualInput();
                     commitTilesetEditor();
+                    SDL_StopTextInput();
                 }
-
-                // "Cancel" button
-                SDL_Rect cancelBtn = {140, screenHeight - 50, 100, 36};
-                if (mx >= cancelBtn.x && mx <= cancelBtn.x + cancelBtn.w &&
-                    my >= cancelBtn.y && my <= cancelBtn.y + cancelBtn.h) {
+                else if (mx >= cancelBtn.x && mx <= cancelBtn.x + cancelBtn.w &&
+                         my >= cancelBtn.y && my <= cancelBtn.y + cancelBtn.h) {
+                    clickedButton = true;
                     editorMode = EditorMode::Paint;
+                    SDL_StopTextInput();
+                    tsEditor.focused = TilesetEditorState::FocusedField::None;
                 }
 
-                // Category selector buttons (T / O / D / R) inside overlay
-                const char* catLabels[] = {"Terrain","Object","Deco","Resource"};
-                for (int i = 0; i < 4; i++) {
-                    SDL_Rect r = {10 + i * 90, 10, 80, 28};
-                    if (mx >= r.x && mx <= r.x + r.w &&
-                        my >= r.y && my <= r.y + r.h) {
-                        tsEditor.category = static_cast<TileCategory>(i);
+                // ── Manual input fields (Mode C only) ────────────────────────
+                if (!clickedButton && tsEditor.mode == TilesetEditorMode::GridManual) {
+                    SDL_Rect fieldW = {10,  75, 80, 24};
+                    SDL_Rect fieldH = {100, 75, 80, 24};
+                    bool clickedField = false;
+
+                    if (mx >= fieldW.x && mx <= fieldW.x + fieldW.w &&
+                        my >= fieldW.y && my <= fieldW.y + fieldW.h) {
+                        tsEditor.focused = TilesetEditorState::FocusedField::Width;
+                        SDL_StartTextInput();
+                        clickedField = true;
+                    }
+                    else if (mx >= fieldH.x && mx <= fieldH.x + fieldH.w &&
+                             my >= fieldH.y && my <= fieldH.y + fieldH.h) {
+                        tsEditor.focused = TilesetEditorState::FocusedField::Height;
+                        SDL_StartTextInput();
+                        clickedField = true;
+                    }
+
+                    if (!clickedField) {
+                        // Clicked outside fields — lose focus and apply size
+                        // applyManualInput() only resets grid if size changed,
+                        // so existing tile selections are preserved
+                        tsEditor.focused = TilesetEditorState::FocusedField::None;
+                        SDL_StopTextInput();
+                        tsEditor.applyManualInput();
+                    }
+                }
+
+                // ── Tile grid clicks ──────────────────────────────────────────
+                if (!clickedButton) {
+                    const int gridOffX = 10;
+                    const int gridOffY = 110;
+                    float previewZoom  = 0.5f;
+
+                    if (tsEditor.mode == TilesetEditorMode::SingleObject) {
+                        int imgDrawW = static_cast<int>(tsEditor.imageW * previewZoom);
+                        int imgDrawH = static_cast<int>(tsEditor.imageH * previewZoom);
+                        SDL_Rect imgRect = {gridOffX, gridOffY, imgDrawW, imgDrawH};
+                        if (mx >= imgRect.x && mx <= imgRect.x + imgRect.w &&
+                            my >= imgRect.y && my <= imgRect.y + imgRect.h) {
+                            tsEditor.included[0] = !tsEditor.included[0];
+                        }
+                    } else {
+                        int cellW = static_cast<int>(tsEditor.tileW * previewZoom);
+                        int cellH = static_cast<int>(tsEditor.tileH * previewZoom);
+                        int col   = (mx - gridOffX) / cellW;
+                        int row   = (my - gridOffY) / cellH;
+
+                        if (col >= 0 && col < tsEditor.cols() &&
+                            row >= 0 && row < tsEditor.rows()) {
+                            int idx = row * tsEditor.cols() + col;
+                            if (idx < (int)tsEditor.included.size())
+                                tsEditor.included[idx] = !tsEditor.included[idx];
+                        }
+                    }
+                }
+
+                // ── Category buttons ──────────────────────────────────────────
+                if (!clickedButton) {
+                    for (int i = 0; i < 4; i++) {
+                        SDL_Rect r = {10 + i * 90, 10, 80, 28};
+                        if (mx >= r.x && mx <= r.x + r.w &&
+                            my >= r.y && my <= r.y + r.h) {
+                            tsEditor.category = static_cast<TileCategory>(i);
+                        }
                     }
                 }
             }
 
-            // Scroll tile size with mouse wheel inside editor
-            if (e.type == SDL_MOUSEWHEEL) {
+            // ── Keyboard input for manual fields ──────────────────────────────
+            if (e.type == SDL_TEXTINPUT &&
+                tsEditor.focused != TilesetEditorState::FocusedField::None) {
+                std::string ch(e.text.text);
+                if (!ch.empty() && std::isdigit(ch[0])) {
+                    if (tsEditor.focused == TilesetEditorState::FocusedField::Width)
+                        tsEditor.inputW += ch;
+                    else
+                        tsEditor.inputH += ch;
+                }
+            }
+
+            if (e.type == SDL_KEYDOWN &&
+                tsEditor.focused != TilesetEditorState::FocusedField::None) {
+
+                if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) {
+                    auto& field = (tsEditor.focused == TilesetEditorState::FocusedField::Width)
+                                  ? tsEditor.inputW : tsEditor.inputH;
+                    if (!field.empty()) field.pop_back();
+                }
+
+                if (e.key.keysym.scancode == SDL_SCANCODE_RETURN) {
+                    tsEditor.applyManualInput();
+                    tsEditor.focused = TilesetEditorState::FocusedField::None;
+                    SDL_StopTextInput();
+                }
+
+                if (e.key.keysym.scancode == SDL_SCANCODE_TAB) {
+                    tsEditor.applyManualInput();
+                    tsEditor.focused = (tsEditor.focused == TilesetEditorState::FocusedField::Width)
+                        ? TilesetEditorState::FocusedField::Height
+                        : TilesetEditorState::FocusedField::Width;
+                }
+            }
+
+            // ── Scroll resizes grid (uniform mode only) ───────────────────────
+            if (e.type == SDL_MOUSEWHEEL &&
+                tsEditor.mode == TilesetEditorMode::GridUniform) {
                 tsEditor.tileW = std::max(8, tsEditor.tileW + e.wheel.y * 8);
-                tsEditor.tileH = tsEditor.tileW; // keep square for now
+                tsEditor.tileH = tsEditor.tileW;
                 tsEditor.reset(tsEditor.imageW, tsEditor.imageH,
                                tsEditor.tileW, tsEditor.tileH);
             }
@@ -133,10 +247,8 @@ void Game::handleEvents() {
         // ── Normal paint mode ─────────────────────────────────────────────────
 
         if (e.type == SDL_KEYDOWN) {
-            // Ctrl+S save map
             if (e.key.keysym.scancode == SDL_SCANCODE_S && keys[SDL_SCANCODE_LCTRL])
                 map.save("../Maps/level1.map");
-            // Ctrl+L load map
             if (e.key.keysym.scancode == SDL_SCANCODE_L && keys[SDL_SCANCODE_LCTRL])
                 map.load("../Maps/level1.map");
         }
@@ -150,20 +262,17 @@ void Game::handleEvents() {
             if (mx >= screenWidth - panelWidth) {
                 consumed = true;
 
-                // Category tab bar
                 if (my < tabBarHeight) {
                     int tabW = panelWidth / 4;
                     int tab  = (mx - (screenWidth - panelWidth)) / tabW;
                     if (tab >= 0 && tab < 4)
                         activeCategory = static_cast<TileCategory>(tab);
                 }
-                // "+ Import" button at bottom of panel
                 else if (my >= screenHeight - 40) {
                     std::string path = openFileDialog();
                     if (!path.empty())
                         openTilesetEditor(path);
                 }
-                // Tile selection in panel
                 else {
                     int localX  = mx - (screenWidth - panelWidth);
                     int localY  = my - tabBarHeight + panelScrollY;
@@ -221,7 +330,7 @@ void Game::handleEvents() {
                 paintTileAtMouse();
         }
 
-        // Panel scroll
+        // ── Scroll / zoom ─────────────────────────────────────────────────────
         if (e.type == SDL_MOUSEWHEEL) {
             int mx, my;
             SDL_GetMouseState(&mx, &my);
@@ -253,7 +362,6 @@ void Game::paintTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
 
-    // Don't paint over UI
     if (mx >= screenWidth - panelWidth) return;
     if (my >= screenHeight - bottomBarHeight) return;
 
@@ -282,8 +390,6 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
     SDL_RenderClear(renderer);
 
-    // ── World ─────────────────────────────────────────────────────────────────
-    // Map render — still uses old TileSet internally for now (Step 5 will swap)
     map.render(renderer, camera);
 
     // Ghost preview
@@ -316,27 +422,22 @@ void Game::render() {
 void Game::renderPanel() {
     const int px = screenWidth - panelWidth;
 
-    // Background
     SDL_Rect bg = {px, 0, panelWidth, screenHeight};
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &bg);
 
-    // Tab bar
+    // Category tab bar
     const char* tabNames[] = {"Terrain", "Object", "Deco", "Resource"};
     int tabW = panelWidth / 4;
     for (int i = 0; i < 4; i++) {
         SDL_Rect tab = {px + i * tabW, 0, tabW, tabBarHeight};
-
         if (static_cast<TileCategory>(i) == activeCategory)
             SDL_SetRenderDrawColor(renderer, 80, 130, 200, 255);
         else
             SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
         SDL_RenderFillRect(renderer, &tab);
-
         SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
         SDL_RenderDrawRect(renderer, &tab);
-
-        // ← text added
         textRenderer.drawCentered(renderer, tabNames[i], tab);
     }
 
@@ -346,19 +447,17 @@ void Game::renderPanel() {
     int  startY   = tabBarHeight - panelScrollY;
 
     for (int i = 0; i < (int)catTiles.size(); i++) {
-        int col  = i % cols;
-        int row  = i / cols;
+        int col   = i % cols;
+        int row   = i / cols;
         int drawX = px + col * panelTileSize;
         int drawY = startY + row * panelTileSize;
 
-        // Skip if off-screen
         if (drawY + panelTileSize < tabBarHeight) continue;
         if (drawY > screenHeight - 40)            continue;
 
         tileRenderer.renderTile(renderer, catTiles[i], drawX, drawY,
                                 (float)panelTileSize / catTiles[i].srcW);
 
-        // Highlight selected
         if (catTiles[i].id == selectedTile) {
             SDL_Rect hl = {drawX, drawY, panelTileSize, panelTileSize};
             SDL_SetRenderDrawColor(renderer, 255, 220, 0, 255);
@@ -366,11 +465,11 @@ void Game::renderPanel() {
         }
     }
 
-    // "+ Import" button at bottom
+    // "+ Import" button
     SDL_Rect importBtn = {px + 10, screenHeight - 36, panelWidth - 20, 28};
     SDL_SetRenderDrawColor(renderer, 60, 100, 60, 255);
     SDL_RenderFillRect(renderer, &importBtn);
-    textRenderer.drawCentered(renderer, "+ Import", importBtn); // ← added
+    textRenderer.drawCentered(renderer, "+ Import", importBtn);
 }
 
 // ── renderBottomBar ──────────────────────────────────────────────────────────
@@ -383,14 +482,12 @@ void Game::renderBottomBar() {
 
     for (int i = 0; i < 5; i++) {
         SDL_Rect r = {20 + i * 120, screenHeight - 50, 100, 36};
-
         if (i == selectedLayer)
             SDL_SetRenderDrawColor(renderer, 200, 180, 50, 255);
         else
             SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
         SDL_RenderFillRect(renderer, &r);
-
-        textRenderer.drawCentered(renderer, "Layer " + std::to_string(i + 1), r); // ← added
+        textRenderer.drawCentered(renderer, "Layer " + std::to_string(i + 1), r);
     }
 }
 
@@ -409,25 +506,44 @@ void Game::openTilesetEditor(const std::string& imagePath) {
 }
 
 void Game::commitTilesetEditor() {
-    int cols = tsEditor.cols();
-    for (int i = 0; i < (int)tsEditor.included.size(); i++) {
-        if (!tsEditor.included[i]) continue;
+    std::cout << "commit called, mode=" << (int)tsEditor.mode
+              << " included count=" << tsEditor.included.size() << "\n";
+    int includedCount = 0;
+    for (bool b : tsEditor.included) if (b) includedCount++;
+    std::cout << "tiles selected: " << includedCount << "\n" << std::flush;
 
-        int col = i % cols;
-        int row = i / cols;
-
-        TileDefinition def;
-        def.imagePath = tsEditor.imagePath;
-        def.srcX      = col * tsEditor.tileW;
-        def.srcY      = row * tsEditor.tileH;
-        def.srcW      = tsEditor.tileW;
-        def.srcH      = tsEditor.tileH;
-        def.tileW     = std::max(1, tsEditor.tileW / TILE_SIZE);
-        def.tileH     = std::max(1, tsEditor.tileH / TILE_SIZE);
-        def.category  = tsEditor.category;
-        def.label     = "";
-
-        tileLibrary.addTile(def);
+    if (tsEditor.mode == TilesetEditorMode::SingleObject) {
+        if (tsEditor.included[0]) {
+            TileDefinition def;
+            def.imagePath = tsEditor.imagePath;
+            def.srcX      = 0;
+            def.srcY      = 0;
+            def.srcW      = tsEditor.imageW;
+            def.srcH      = tsEditor.imageH;
+            def.tileW     = std::max(1, tsEditor.imageW / TILE_SIZE);
+            def.tileH     = std::max(1, tsEditor.imageH / TILE_SIZE);
+            def.category  = tsEditor.category;
+            def.label     = "";
+            tileLibrary.addTile(def);
+        }
+    } else {
+        int cols = tsEditor.cols();
+        for (int i = 0; i < (int)tsEditor.included.size(); i++) {
+            if (!tsEditor.included[i]) continue;
+            int col = i % cols;
+            int row = i / cols;
+            TileDefinition def;
+            def.imagePath = tsEditor.imagePath;
+            def.srcX      = col * tsEditor.tileW;
+            def.srcY      = row * tsEditor.tileH;
+            def.srcW      = tsEditor.tileW;
+            def.srcH      = tsEditor.tileH;
+            def.tileW     = std::max(1, tsEditor.tileW / TILE_SIZE);
+            def.tileH     = std::max(1, tsEditor.tileH / TILE_SIZE);
+            def.category  = tsEditor.category;
+            def.label     = "";
+            tileLibrary.addTile(def);
+        }
     }
 
     tileLibrary.save("../Assets/Tilesets/library.tileset");
@@ -435,67 +551,123 @@ void Game::commitTilesetEditor() {
 }
 
 void Game::renderTilesetEditor() {
-    // Dark overlay over world
+    // Dark overlay
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
     SDL_Rect overlay = {0, 0, screenWidth - panelWidth, screenHeight};
     SDL_RenderFillRect(renderer, &overlay);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-    float previewZoom = 0.5f;
-    int cellW = static_cast<int>(tsEditor.tileW * previewZoom);
-    int cellH = static_cast<int>(tsEditor.tileH * previewZoom);
-    const int gridOffX = 10;
-    const int gridOffY = 60;
-
-    // Draw each cell
-    for (int i = 0; i < tsEditor.count(); i++) {
-        int col   = i % tsEditor.cols();
-        int row   = i / tsEditor.cols();
-        int drawX = gridOffX + col * cellW;
-        int drawY = gridOffY + row * cellH;
-
-        SDL_Rect src = {
-            col * tsEditor.tileW,
-            row * tsEditor.tileH,
-            tsEditor.tileW,
-            tsEditor.tileH
-        };
-
-        tileRenderer.renderRaw(renderer, tsEditor.imagePath, src,
-                               drawX, drawY, previewZoom,
-                               tsEditor.included[i] ? 255 : 60);
-
-        if (tsEditor.included[i]) {
-            SDL_SetRenderDrawColor(renderer, 80, 220, 80, 255);
-            SDL_Rect border = {drawX, drawY, cellW, cellH};
-            SDL_RenderDrawRect(renderer, &border);
-        }
-    }
-
-    // Category buttons
+    // ── Category buttons ──────────────────────────────────────────────────
     const char* catNames[] = {"Terrain", "Object", "Deco", "Resource"};
     for (int i = 0; i < 4; i++) {
         SDL_Rect r = {10 + i * 90, 10, 80, 28};
-        if (static_cast<TileCategory>(i) == tsEditor.category)
-            SDL_SetRenderDrawColor(renderer, 80, 130, 200, 255);
-        else
-            SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
+        SDL_SetRenderDrawColor(renderer,
+            static_cast<TileCategory>(i) == tsEditor.category ? 80 : 60,
+            static_cast<TileCategory>(i) == tsEditor.category ? 130 : 60,
+            static_cast<TileCategory>(i) == tsEditor.category ? 200 : 60,
+            255);
         SDL_RenderFillRect(renderer, &r);
         SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
         SDL_RenderDrawRect(renderer, &r);
         textRenderer.drawCentered(renderer, catNames[i], r);
     }
 
-    // Tile size hint
-    textRenderer.draw(renderer,
-        "Tile size: " + std::to_string(tsEditor.tileW) +
-        "x"          + std::to_string(tsEditor.tileH) +
-        "  (scroll to resize)",
-        10, screenHeight - 90, {200, 200, 200, 255}
-    );
+    // ── Mode selector ─────────────────────────────────────────────────────
+    struct { SDL_Rect r; const char* label; TilesetEditorMode m; } modes[] = {
+        {{10,  45, 120, 26}, "Single Object", TilesetEditorMode::SingleObject},
+        {{140, 45, 120, 26}, "Grid Uniform",  TilesetEditorMode::GridUniform},
+        {{270, 45, 130, 26}, "Grid Manual",   TilesetEditorMode::GridManual},
+    };
+    for (auto& [r, label, m] : modes) {
+        SDL_SetRenderDrawColor(renderer,
+            tsEditor.mode == m ? 100 : 60,
+            tsEditor.mode == m ? 160 : 60,
+            tsEditor.mode == m ? 100 : 60,
+            255);
+        SDL_RenderFillRect(renderer, &r);
+        SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
+        SDL_RenderDrawRect(renderer, &r);
+        textRenderer.drawCentered(renderer, label, r);
+    }
 
-    // ✅ Declare FIRST, fill rect, THEN draw text on top
+    // ── Manual input fields ───────────────────────────────────────────────
+    if (tsEditor.mode == TilesetEditorMode::GridManual) {
+        SDL_Rect fieldW = {10,  75, 80, 24};
+        SDL_Rect fieldH = {100, 75, 80, 24};
+
+        auto drawField = [&](SDL_Rect r, const std::string& val,
+                             bool focused, const std::string& hint) {
+            SDL_SetRenderDrawColor(renderer,
+                focused ? 50 : 30, focused ? 50 : 30, focused ? 70 : 30, 255);
+            SDL_RenderFillRect(renderer, &r);
+            SDL_SetRenderDrawColor(renderer,
+                focused ? 100 : 80, focused ? 150 : 80, focused ? 255 : 80, 255);
+            SDL_RenderDrawRect(renderer, &r);
+            textRenderer.draw(renderer, hint, r.x, r.y - 14, {160, 160, 160, 255});
+            std::string display = val + (focused ? "|" : "");
+            textRenderer.draw(renderer, display, r.x + 4, r.y + 5);
+        };
+
+        bool wFocused = tsEditor.focused == TilesetEditorState::FocusedField::Width;
+        bool hFocused = tsEditor.focused == TilesetEditorState::FocusedField::Height;
+        drawField(fieldW, tsEditor.inputW, wFocused, "Width");
+        drawField(fieldH, tsEditor.inputH, hFocused, "Height");
+
+        textRenderer.draw(renderer, "(Enter to apply, Tab to switch field)",
+            190, 80, {140, 140, 140, 255});
+
+    } else if (tsEditor.mode == TilesetEditorMode::GridUniform) {
+        textRenderer.draw(renderer,
+            "Tile size: " + std::to_string(tsEditor.tileW) +
+            " x " + std::to_string(tsEditor.tileH) +
+            "   (scroll to resize)",
+            10, 78, {200, 200, 200, 255});
+    }
+
+    // ── Tile grid ─────────────────────────────────────────────────────────
+    const int gridOffX    = 10;
+    const int gridOffY    = 110;
+    float     previewZoom = 0.5f;
+
+    if (tsEditor.mode == TilesetEditorMode::SingleObject) {
+        int drawW = static_cast<int>(tsEditor.imageW * previewZoom);
+        int drawH = static_cast<int>(tsEditor.imageH * previewZoom);
+        SDL_Rect src = {0, 0, tsEditor.imageW, tsEditor.imageH};
+        tileRenderer.renderRaw(renderer, tsEditor.imagePath, src,
+                               gridOffX, gridOffY, previewZoom,
+                               tsEditor.included[0] ? 255 : 60);
+        if (tsEditor.included[0]) {
+            SDL_SetRenderDrawColor(renderer, 80, 220, 80, 255);
+            SDL_Rect border = {gridOffX, gridOffY, drawW, drawH};
+            SDL_RenderDrawRect(renderer, &border);
+        }
+    } else {
+        int cellW = static_cast<int>(tsEditor.tileW * previewZoom);
+        int cellH = static_cast<int>(tsEditor.tileH * previewZoom);
+
+        for (int i = 0; i < tsEditor.count(); i++) {
+            int col   = i % tsEditor.cols();
+            int row   = i / tsEditor.cols();
+            int drawX = gridOffX + col * cellW;
+            int drawY = gridOffY + row * cellH;
+
+            SDL_Rect src = {
+                col * tsEditor.tileW, row * tsEditor.tileH,
+                tsEditor.tileW,       tsEditor.tileH
+            };
+            tileRenderer.renderRaw(renderer, tsEditor.imagePath, src,
+                                   drawX, drawY, previewZoom,
+                                   tsEditor.included[i] ? 255 : 60);
+            if (tsEditor.included[i]) {
+                SDL_SetRenderDrawColor(renderer, 80, 220, 80, 255);
+                SDL_Rect border = {drawX, drawY, cellW, cellH};
+                SDL_RenderDrawRect(renderer, &border);
+            }
+        }
+    }
+
+    // ── Save / Cancel ─────────────────────────────────────────────────────
     SDL_Rect saveBtn   = {10,  screenHeight - 50, 120, 36};
     SDL_Rect cancelBtn = {140, screenHeight - 50, 100, 36};
 
@@ -511,7 +683,6 @@ void Game::renderTilesetEditor() {
 // ── openFileDialog ────────────────────────────────────────────────────────────
 
 std::string Game::openFileDialog() {
-    // Uses zenity (Linux). Replace with tinyfd or win32 on Windows.
     FILE* f = popen("zenity --file-selection --file-filter='PNG files | *.png'", "r");
     if (!f) return "";
     char buf[512] = {};
