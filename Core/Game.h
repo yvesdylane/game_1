@@ -119,6 +119,7 @@ private:
 
     // paint mode
     void paintTileAtMouse();
+    void eraseTileAtMouse();
 
     // panel
     void renderPanel();

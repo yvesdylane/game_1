@@ -80,7 +80,6 @@ void Game::handleEvents() {
                 int mx = e.button.x;
                 int my = e.button.y;
 
-                // ── Mode selector buttons ─────────────────────────────────────
                 SDL_Rect modeSingle = {10,  45, 120, 26};
                 SDL_Rect modeGrid   = {140, 45, 120, 26};
                 SDL_Rect modeManual = {270, 45, 130, 26};
@@ -105,9 +104,6 @@ void Game::handleEvents() {
                     tsEditor.included.assign(tsEditor.count(), false);
                 }
 
-                // ── Save / Cancel checked BEFORE field focus logic ────────────
-                // This prevents the "click outside = lose focus + reset" branch
-                // from wiping included[] when Save is clicked.
                 SDL_Rect saveBtn   = {10,  screenHeight - 50, 120, 36};
                 SDL_Rect cancelBtn = {140, screenHeight - 50, 100, 36};
                 bool clickedButton = false;
@@ -127,7 +123,6 @@ void Game::handleEvents() {
                     tsEditor.focused = TilesetEditorState::FocusedField::None;
                 }
 
-                // ── Manual input fields (Mode C only) ────────────────────────
                 if (!clickedButton && tsEditor.mode == TilesetEditorMode::GridManual) {
                     SDL_Rect fieldW = {10,  75, 80, 24};
                     SDL_Rect fieldH = {100, 75, 80, 24};
@@ -147,16 +142,12 @@ void Game::handleEvents() {
                     }
 
                     if (!clickedField) {
-                        // Clicked outside fields — lose focus and apply size
-                        // applyManualInput() only resets grid if size changed,
-                        // so existing tile selections are preserved
                         tsEditor.focused = TilesetEditorState::FocusedField::None;
                         SDL_StopTextInput();
                         tsEditor.applyManualInput();
                     }
                 }
 
-                // ── Tile grid clicks ──────────────────────────────────────────
                 if (!clickedButton) {
                     const int gridOffX = 10;
                     const int gridOffY = 110;
@@ -185,7 +176,6 @@ void Game::handleEvents() {
                     }
                 }
 
-                // ── Category buttons ──────────────────────────────────────────
                 if (!clickedButton) {
                     for (int i = 0; i < 4; i++) {
                         SDL_Rect r = {10 + i * 90, 10, 80, 28};
@@ -197,7 +187,7 @@ void Game::handleEvents() {
                 }
             }
 
-            // ── Keyboard input for manual fields ──────────────────────────────
+            // Keyboard input for manual fields
             if (e.type == SDL_TEXTINPUT &&
                 tsEditor.focused != TilesetEditorState::FocusedField::None) {
                 std::string ch(e.text.text);
@@ -211,19 +201,16 @@ void Game::handleEvents() {
 
             if (e.type == SDL_KEYDOWN &&
                 tsEditor.focused != TilesetEditorState::FocusedField::None) {
-
                 if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) {
                     auto& field = (tsEditor.focused == TilesetEditorState::FocusedField::Width)
                                   ? tsEditor.inputW : tsEditor.inputH;
                     if (!field.empty()) field.pop_back();
                 }
-
                 if (e.key.keysym.scancode == SDL_SCANCODE_RETURN) {
                     tsEditor.applyManualInput();
                     tsEditor.focused = TilesetEditorState::FocusedField::None;
                     SDL_StopTextInput();
                 }
-
                 if (e.key.keysym.scancode == SDL_SCANCODE_TAB) {
                     tsEditor.applyManualInput();
                     tsEditor.focused = (tsEditor.focused == TilesetEditorState::FocusedField::Width)
@@ -232,7 +219,6 @@ void Game::handleEvents() {
                 }
             }
 
-            // ── Scroll resizes grid (uniform mode only) ───────────────────────
             if (e.type == SDL_MOUSEWHEEL &&
                 tsEditor.mode == TilesetEditorMode::GridUniform) {
                 tsEditor.tileW = std::max(8, tsEditor.tileW + e.wheel.y * 8);
@@ -241,7 +227,7 @@ void Game::handleEvents() {
                                tsEditor.tileW, tsEditor.tileH);
             }
 
-            continue; // don't process paint events while in editor
+            continue; // ← stops here, nothing below runs in editor mode
         }
 
         // ── Normal paint mode ─────────────────────────────────────────────────
@@ -253,15 +239,14 @@ void Game::handleEvents() {
                 map.load("../Maps/level1.map");
         }
 
+        // ── Left click ────────────────────────────────────────────────────────
         if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = e.button.x;
             int my = e.button.y;
             bool consumed = false;
 
-            // ── Right panel ───────────────────────────────────────────────────
             if (mx >= screenWidth - panelWidth) {
                 consumed = true;
-
                 if (my < tabBarHeight) {
                     int tabW = panelWidth / 4;
                     int tab  = (mx - (screenWidth - panelWidth)) / tabW;
@@ -279,7 +264,6 @@ void Game::handleEvents() {
                     int cols    = panelWidth / panelTileSize;
                     int col     = localX / panelTileSize;
                     int row     = localY / panelTileSize;
-
                     auto catTiles = tileLibrary.getByCategory(activeCategory);
                     int  idx      = row * cols + col;
                     if (idx >= 0 && idx < (int)catTiles.size())
@@ -287,7 +271,6 @@ void Game::handleEvents() {
                 }
             }
 
-            // ── Bottom bar (layer selection) ──────────────────────────────────
             if (!consumed && my >= screenHeight - bottomBarHeight) {
                 for (int i = 0; i < 5; i++) {
                     SDL_Rect r = {20 + i * 120, screenHeight - 50, 100, 36};
@@ -300,7 +283,6 @@ void Game::handleEvents() {
                 }
             }
 
-            // ── World paint ───────────────────────────────────────────────────
             if (!consumed) {
                 if (keys[SDL_SCANCODE_SPACE]) {
                     dragging = true;
@@ -311,12 +293,21 @@ void Game::handleEvents() {
             }
         }
 
+        // ── Right click erase ─────────────────────────────────────────────────
+        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_RIGHT) {
+            int mx = e.button.x;
+            int my = e.button.y;
+            if (mx < screenWidth - panelWidth && my < screenHeight - bottomBarHeight)
+                eraseTileAtMouse();
+        }
+
         if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT)
             dragging = false;
 
         if (e.type == SDL_KEYUP && e.key.keysym.scancode == SDL_SCANCODE_SPACE)
             dragging = false;
 
+        // ── Mouse motion ──────────────────────────────────────────────────────
         if (e.type == SDL_MOUSEMOTION) {
             if (dragging && keys[SDL_SCANCODE_SPACE]) {
                 int mx, my;
@@ -326,15 +317,22 @@ void Game::handleEvents() {
                 lastMouseX = mx;
                 lastMouseY = my;
             }
+            // Left drag = paint
             if ((e.motion.state & SDL_BUTTON_LMASK) && !keys[SDL_SCANCODE_SPACE])
                 paintTileAtMouse();
+            // Right drag = erase
+            if (e.motion.state & SDL_BUTTON_RMASK) {
+                int mx = e.motion.x;
+                int my = e.motion.y;
+                if (mx < screenWidth - panelWidth && my < screenHeight - bottomBarHeight)
+                    eraseTileAtMouse();
+            }
         }
 
         // ── Scroll / zoom ─────────────────────────────────────────────────────
         if (e.type == SDL_MOUSEWHEEL) {
             int mx, my;
             SDL_GetMouseState(&mx, &my);
-
             if (mx >= screenWidth - panelWidth) {
                 panelScrollY = std::max(0, panelScrollY - e.wheel.y * panelTileSize);
             } else {
@@ -355,7 +353,6 @@ void Game::handleEvents() {
         }
     }
 }
-
 // ── paintTileAtMouse ─────────────────────────────────────────────────────────
 
 void Game::paintTileAtMouse() {
@@ -380,6 +377,22 @@ void Game::paintTileAtMouse() {
             map.setTile(selectedLayer, tileX + dx, tileY + dy, selectedTile);
 }
 
+// Add this new method for erasing
+void Game::eraseTileAtMouse() {
+    int mx, my;
+    SDL_GetMouseState(&mx, &my);
+
+    if (mx >= screenWidth - panelWidth) return;
+    if (my >= screenHeight - bottomBarHeight) return;
+
+    float worldX = camera.x + mx / camera.zoom;
+    float worldY = camera.y + my / camera.zoom;
+
+    int tileX = static_cast<int>(worldX / TILE_SIZE);
+    int tileY = static_cast<int>(worldY / TILE_SIZE);
+
+    map.clearTile(selectedLayer, tileX, tileY);
+}
 // ── update ───────────────────────────────────────────────────────────────────
 
 void Game::update(float) {}
@@ -390,7 +403,7 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
     SDL_RenderClear(renderer);
 
-    map.render(renderer, camera);
+    map.render(renderer, camera, tileLibrary, tileRenderer);
 
     // Ghost preview
     int mx, my;
