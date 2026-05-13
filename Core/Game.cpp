@@ -1,6 +1,7 @@
 #include "Game.h"
 #include <iostream>
 #include <cstdio>
+#include "tinyfiledialogs.h"
 
 // ── init ─────────────────────────────────────────────────────────────────────
 
@@ -142,26 +143,23 @@ void Game::handleEvents() {
                 }
 
                 case MenuAction::LoadTileset: {
-                    // Open file dialog for .tileset file
-                    FILE* f = popen("zenity --file-selection --file-filter='Tileset files | *.tileset'", "r");
-                    if (f) {
-                        char buf[512] = {};
-                        fgets(buf, sizeof(buf), f);
-                        pclose(f);
-                        std::string path(buf);
-                        if (!path.empty() && path.back() == '\n') path.pop_back();
-                        if (!path.empty()) {
-                            // Extract filename
-                            std::string fname = path.substr(path.find_last_of("/\\") + 1);
-                            TileLibrary tmp;
-                            if (tmp.load(path)) {
-                                for (auto def : tmp.all()) {
-                                    tileRenderer.loadTexture(renderer, def.imagePath);
-                                    tileLibrary.addTile(def);
-                                }
-                                tilesetManager.addTileset(fname, fname);
-                                tilesetManager.save(TILESETS_INDEX);
+                    const char* filters[] = {"*.tileset"};
+                    const char* result = tinyfd_openFileDialog(
+                        "Select Tileset File",
+                        "../Assets/Tilesets/",
+                        1, filters, "Tileset Files", 0
+                    );
+                    if (result) {
+                        std::string path(result);
+                        std::string fname = path.substr(path.find_last_of("/\\") + 1);
+                        TileLibrary tmp;
+                        if (tmp.load(path)) {
+                            for (auto def : tmp.all()) {
+                                tileRenderer.loadTexture(renderer, def.imagePath);
+                                tileLibrary.addTile(def);
                             }
+                            tilesetManager.addTileset(fname, fname);
+                            tilesetManager.save(TILESETS_INDEX);
                         }
                     }
                     break;
@@ -931,15 +929,16 @@ void Game::renderTilesetEditor() {
 // ── openFileDialog ────────────────────────────────────────────────────────────
 
 std::string Game::openFileDialog() {
-    FILE* f = popen("zenity --file-selection --file-filter='PNG files | *.png'", "r");
-    if (!f) return "";
-    char buf[512] = {};
-    fgets(buf, sizeof(buf), f);
-    pclose(f);
-    std::string result(buf);
-    if (!result.empty() && result.back() == '\n')
-        result.pop_back();
-    return result;
+    const char* filters[] = {"*.png"};
+    const char* result = tinyfd_openFileDialog(
+        "Select Tileset Image",  // title
+        "",                      // default path
+        1,                       // filter count
+        filters,                 // filters
+        "PNG Images",            // filter description
+        0                        // single select
+    );
+    return result ? std::string(result) : "";
 }
 
 // ── clean ─────────────────────────────────────────────────────────────────────

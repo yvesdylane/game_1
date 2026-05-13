@@ -37,6 +37,7 @@ add_executable(Game1 main.cpp
 target_include_directories(Game1 PRIVATE
         ${SDL2_INCLUDE_DIRS}
         ${SDL2_IMAGE_INCLUDE_DIRS}
+        vendor/tinyfiledialogs
 )
 target_link_libraries(Game1
         SDL2
