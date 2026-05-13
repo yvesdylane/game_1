@@ -8,6 +8,9 @@
 #include "../Rendering/TileRenderer.h"
 #include "../Rendering/Camera.h"
 #include "../Rendering/TextRenderer.h"
+#include "../Editor/MenuBar.h"
+#include "../Editor/MapManager.h"
+#include "../Editor/TilesetManager.h"
 
 // ── Editor mode ───────────────────────────────────────────────────────────────
 enum class EditorMode {
@@ -19,6 +22,12 @@ enum class TilesetEditorMode {
     SingleObject,  // whole image = one tile
     GridUniform,   // square tiles, scroll to resize
     GridManual     // manual W/H input via keyboard
+};
+
+// Placement mode
+enum class PlacementMode {
+    Grid,   // snaps to tile grid
+    Free    // follows mouse exactly (Tab to toggle)
 };
 
 struct TilesetEditorState {
@@ -93,8 +102,10 @@ private:
     int         selectedTile = 0;      // global TileDefinition id
     int         selectedLayer = 0;
     TileCategory activeCategory = TileCategory::Terrain;
-
     TilesetEditorState tsEditor;
+
+    PlacementMode placementMode  = PlacementMode::Grid;
+    int selectedObject = -1;  // index into map.getObjects(), -1 = none
 
     // panel scroll offset (pixels scrolled down in tile panel)
     int panelScrollY = 0;
@@ -103,6 +114,20 @@ private:
     bool dragging   = false;
     int  lastMouseX = 0;
     int  lastMouseY = 0;
+
+    MenuBar        menuBar;
+    MapManager     mapManager;
+    TilesetManager tilesetManager;
+
+    static constexpr int menuBarHeight = MenuBar::HEIGHT;
+
+    // For "New Map" / "Save As" name input
+    bool        namingMap    = false;
+    std::string mapNameInput = "";
+
+    // Index paths
+    static constexpr const char* MAPS_INDEX     = "../Maps/maps.index";
+    static constexpr const char* TILESETS_INDEX = "../Assets/Tilesets/tilesets.index";
 
     // ── Layout constants ──────────────────────────────────────────────────────
     static constexpr int screenWidth    = 1280;

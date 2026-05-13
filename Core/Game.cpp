@@ -1,8 +1,6 @@
 #include "Game.h"
 #include <iostream>
-#include <cstdlib>
 #include <cstdio>
-#include "../World/WorldConfig.h"
 
 // ── init ─────────────────────────────────────────────────────────────────────
 
@@ -46,6 +44,32 @@ bool Game::init() {
         tileRenderer.loadTexture(renderer, def.imagePath);
     std::cout << "[8] textures loaded\n" << std::flush;
 
+    // Load map index
+    mapManager.load(MAPS_INDEX);
+    if (mapManager.getMaps().empty()) {
+        // First run — create a default map
+        mapManager.addMap("Level 1", "level1.map");
+        mapManager.save(MAPS_INDEX);
+    }
+
+    // Load active map
+    const MapEntry* active = mapManager.getActiveEntry();
+    if (active)
+        map.load("../Maps/" + active->file);
+
+    // Load tileset index
+    tilesetManager.load(TILESETS_INDEX);
+    // Reload all tilesets into library
+    for (const auto& ts : tilesetManager.getTilesets()) {
+        TileLibrary tmp;
+        if (tmp.load("../Assets/Tilesets/" + ts.file)) {
+            for (const auto& def : tmp.all()) {
+                tileRenderer.loadTexture(renderer, def.imagePath);
+                tileLibrary.addTile(const_cast<TileDefinition&>(def));
+            }
+        }
+    }
+
     return true;
 }
 
@@ -72,6 +96,120 @@ void Game::handleEvents() {
     while (SDL_PollEvent(&e)) {
 
         if (e.type == SDL_QUIT) { running = false; }
+
+        // ── Menu bar ──────────────────────────────────────────────────────────────────
+    if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+        int mx = e.button.x;
+        int my = e.button.y;
+
+        // Offset my for menu bar height check
+        if (my < menuBarHeight || menuBar.isOpen()) {
+            MenuResult result = menuBar.handleClick(mx, my, mapManager, tilesetManager, screenWidth);
+
+            switch (result.action) {
+
+                case MenuAction::NewMap: {
+                    // Prompt for name via simple input overlay
+                    namingMap    = true;
+                    mapNameInput = "";
+                    SDL_StartTextInput();
+                    break;
+                }
+
+                case MenuAction::SaveMap: {
+                    const MapEntry* entry = mapManager.getActiveEntry();
+                    if (entry) map.save("../Maps/" + entry->file);
+                    break;
+                }
+
+                case MenuAction::SaveMapAs: {
+                    namingMap    = true;
+                    mapNameInput = "";
+                    SDL_StartTextInput();
+                    break;
+                }
+
+                case MenuAction::SwitchMap: {
+                    // Save current first
+                    const MapEntry* cur = mapManager.getActiveEntry();
+                    if (cur) map.save("../Maps/" + cur->file);
+                    // Switch
+                    mapManager.setActive(result.payload);
+                    mapManager.save(MAPS_INDEX);
+                    const MapEntry* next = mapManager.getActiveEntry();
+                    if (next) map.load("../Maps/" + next->file);
+                    break;
+                }
+
+                case MenuAction::LoadTileset: {
+                    // Open file dialog for .tileset file
+                    FILE* f = popen("zenity --file-selection --file-filter='Tileset files | *.tileset'", "r");
+                    if (f) {
+                        char buf[512] = {};
+                        fgets(buf, sizeof(buf), f);
+                        pclose(f);
+                        std::string path(buf);
+                        if (!path.empty() && path.back() == '\n') path.pop_back();
+                        if (!path.empty()) {
+                            // Extract filename
+                            std::string fname = path.substr(path.find_last_of("/\\") + 1);
+                            TileLibrary tmp;
+                            if (tmp.load(path)) {
+                                for (auto def : tmp.all()) {
+                                    tileRenderer.loadTexture(renderer, def.imagePath);
+                                    tileLibrary.addTile(def);
+                                }
+                                tilesetManager.addTileset(fname, fname);
+                                tilesetManager.save(TILESETS_INDEX);
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                case MenuAction::RemoveTileset: {
+                    // For now just remove from index, keep tiles in memory this session
+                    tilesetManager.removeTileset(result.payload);
+                    tilesetManager.save(TILESETS_INDEX);
+                    break;
+                }
+
+                default: break;
+            }
+
+            // If menu bar consumed the click, don't process world clicks
+            if (result.action != MenuAction::None || menuBar.isOpen() || my < menuBarHeight)
+                continue;
+        }
+    }
+
+    // ── New map naming overlay input ──────────────────────────────────────────────
+    if (namingMap) {
+        if (e.type == SDL_TEXTINPUT)
+            mapNameInput += e.text.text;
+
+        if (e.type == SDL_KEYDOWN) {
+            if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE && !mapNameInput.empty())
+                mapNameInput.pop_back();
+
+            if (e.key.keysym.scancode == SDL_SCANCODE_RETURN && !mapNameInput.empty()) {
+                std::string file = MapManager::nameToFile(mapNameInput);
+                int idx = mapManager.addMap(mapNameInput, file);
+                mapManager.setActive(idx);
+                mapManager.save(MAPS_INDEX);
+                map = Map(); // clear current map
+                map.init(renderer);
+                namingMap = false;
+                SDL_StopTextInput();
+            }
+
+            if (e.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+                namingMap = false;
+                SDL_StopTextInput();
+            }
+        }
+        continue; // block all other input while naming
+    }
 
         // ── Tileset editor mode gets its own input ────────────────────────────
         if (editorMode == EditorMode::TilesetEditor) {
@@ -237,6 +375,20 @@ void Game::handleEvents() {
                 map.save("../Maps/level1.map");
             if (e.key.keysym.scancode == SDL_SCANCODE_L && keys[SDL_SCANCODE_LCTRL])
                 map.load("../Maps/level1.map");
+
+            // Tab toggles placement mode
+            if (e.key.keysym.scancode == SDL_SCANCODE_TAB) {
+                placementMode = (placementMode == PlacementMode::Grid)
+                    ? PlacementMode::Free
+                    : PlacementMode::Grid;
+                selectedObject = -1; // deselect on mode switch
+            }
+
+            // Delete removes selected object
+            if (e.key.keysym.scancode == SDL_SCANCODE_DELETE && selectedObject >= 0) {
+                map.removeObject(selectedObject);
+                selectedObject = -1;
+            }
         }
 
         // ── Left click ────────────────────────────────────────────────────────
@@ -247,7 +399,7 @@ void Game::handleEvents() {
 
             if (mx >= screenWidth - panelWidth) {
                 consumed = true;
-                if (my < tabBarHeight) {
+                if (my >= menuBarHeight && my < menuBarHeight + tabBarHeight) {
                     int tabW = panelWidth / 4;
                     int tab  = (mx - (screenWidth - panelWidth)) / tabW;
                     if (tab >= 0 && tab < 4)
@@ -288,7 +440,29 @@ void Game::handleEvents() {
                     dragging = true;
                     SDL_GetMouseState(&lastMouseX, &lastMouseY);
                 } else {
-                    paintTileAtMouse();
+                    float worldX = camera.x + mx / camera.zoom;
+                    float worldY = camera.y + my / camera.zoom;
+
+                    // Check if we clicked an existing object first
+                    bool clickedObject = false;
+                    const auto& objects = map.getObjects();
+                    for (int i = (int)objects.size() - 1; i >= 0; i--) {
+                        const ObjectInstance& obj = objects[i];
+                        const TileDefinition* def = tileLibrary.getById(obj.tileID);
+                        if (!def) continue;
+
+                        if (worldX >= obj.x && worldX <= obj.x + def->srcW &&
+                            worldY >= obj.y && worldY <= obj.y + def->srcH) {
+                            selectedObject = i;
+                            clickedObject  = true;
+                            break;
+                            }
+                    }
+
+                    if (!clickedObject) {
+                        selectedObject = -1;
+                        paintTileAtMouse();
+                    }
                 }
             }
         }
@@ -358,25 +532,42 @@ void Game::handleEvents() {
 void Game::paintTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-
     if (mx >= screenWidth - panelWidth) return;
     if (my >= screenHeight - bottomBarHeight) return;
-
-    float worldX = camera.x + mx / camera.zoom;
-    float worldY = camera.y + my / camera.zoom;
-
-    int tileX = static_cast<int>(worldX / TILE_SIZE);
-    int tileY = static_cast<int>(worldY / TILE_SIZE);
+    if (my < menuBarHeight) return;
 
     const TileDefinition* def = tileLibrary.getById(selectedTile);
     if (!def) return;
 
-    // Stamp all cells the object occupies
-    for (int dy = 0; dy < def->tileH; dy++)
-        for (int dx = 0; dx < def->tileW; dx++)
-            map.setTile(selectedLayer, tileX + dx, tileY + dy, selectedTile);
-}
+    float worldX = camera.x + mx / camera.zoom;
+    float worldY = camera.y + my / camera.zoom;
 
+    if (def->category == TileCategory::Object ||
+        placementMode == PlacementMode::Free) {
+        // Free placement — pixel position
+        float snapX = worldX;
+        float snapY = worldY;
+
+        if (placementMode == PlacementMode::Grid) {
+            // Still snap to grid even for objects if in grid mode
+            snapX = static_cast<int>(worldX / TILE_SIZE) * TILE_SIZE;
+            snapY = static_cast<int>(worldY / TILE_SIZE) * TILE_SIZE;
+        }
+
+        ObjectInstance obj;
+        obj.tileID = selectedTile;
+        obj.x      = snapX;
+        obj.y      = snapY;
+        obj.layer  = selectedLayer;
+        map.addObject(obj);
+
+        } else {
+            // Grid tile placement for terrain/decoration/resource
+            int tileX = static_cast<int>(worldX / TILE_SIZE);
+            int tileY = static_cast<int>(worldY / TILE_SIZE);
+            map.setTile(selectedLayer, tileX, tileY, selectedTile);
+        }
+}
 // Add this new method for erasing
 void Game::eraseTileAtMouse() {
     int mx, my;
@@ -384,6 +575,7 @@ void Game::eraseTileAtMouse() {
 
     if (mx >= screenWidth - panelWidth) return;
     if (my >= screenHeight - bottomBarHeight) return;
+    if (my < menuBarHeight) return;
 
     float worldX = camera.x + mx / camera.zoom;
     float worldY = camera.y + my / camera.zoom;
@@ -403,29 +595,62 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
     SDL_RenderClear(renderer);
 
-    map.render(renderer, camera, tileLibrary, tileRenderer);
+    map.render(renderer, camera, tileLibrary, tileRenderer, selectedObject);
 
     // Ghost preview
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-    if (mx < screenWidth - panelWidth && my < screenHeight - bottomBarHeight) {
+    if (mx < screenWidth - panelWidth &&
+        !(my < menuBarHeight || my >= screenHeight - bottomBarHeight)) {
         float worldX = camera.x + mx / camera.zoom;
         float worldY = camera.y + my / camera.zoom;
-        int tileX = static_cast<int>(worldX / TILE_SIZE);
-        int tileY = static_cast<int>(worldY / TILE_SIZE);
-        int drawX = static_cast<int>((tileX * TILE_SIZE - camera.x) * camera.zoom);
-        int drawY = static_cast<int>((tileY * TILE_SIZE - camera.y) * camera.zoom);
 
         const TileDefinition* def = tileLibrary.getById(selectedTile);
-        if (def)
+        if (def) {
+            float ghostX, ghostY;
+            if (placementMode == PlacementMode::Free ||
+                def->category == TileCategory::Object) {
+                ghostX = worldX;
+                ghostY = worldY;
+            } else {
+                ghostX = static_cast<int>(worldX / TILE_SIZE) * TILE_SIZE;
+                ghostY = static_cast<int>(worldY / TILE_SIZE) * TILE_SIZE;
+            }
+            int drawX = static_cast<int>((ghostX - camera.x) * camera.zoom);
+            int drawY = static_cast<int>((ghostY - camera.y) * camera.zoom);
             tileRenderer.renderTile(renderer, *def, drawX, drawY, camera.zoom, 150);
+        }
     }
 
     renderPanel();
     renderBottomBar();
 
+    // Tileset editor BEFORE menu bar — so menu bar renders on top
     if (editorMode == EditorMode::TilesetEditor)
         renderTilesetEditor();
+
+    // ✅ Menu bar always on top of everything except naming overlay
+    menuBar.render(renderer, textRenderer, mapManager, tilesetManager, screenWidth);
+
+    // Naming overlay on top of absolutely everything
+    if (namingMap) {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160);
+        SDL_Rect overlay = {0, 0, screenWidth, screenHeight};
+        SDL_RenderFillRect(renderer, &overlay);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+        SDL_Rect box = {screenWidth/2 - 150, screenHeight/2 - 30, 300, 60};
+        SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+        SDL_RenderFillRect(renderer, &box);
+        SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+        SDL_RenderDrawRect(renderer, &box);
+
+        textRenderer.draw(renderer, "Map name:",
+            box.x + 10, box.y + 8, {160, 160, 160, 255});
+        textRenderer.draw(renderer, mapNameInput + "|",
+            box.x + 10, box.y + 28);
+    }
 
     SDL_RenderPresent(renderer);
 }
@@ -435,7 +660,7 @@ void Game::render() {
 void Game::renderPanel() {
     const int px = screenWidth - panelWidth;
 
-    SDL_Rect bg = {px, 0, panelWidth, screenHeight};
+    SDL_Rect bg = {px, menuBarHeight, panelWidth, screenHeight - menuBarHeight};
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &bg);
 
@@ -443,7 +668,7 @@ void Game::renderPanel() {
     const char* tabNames[] = {"Terrain", "Object", "Deco", "Resource"};
     int tabW = panelWidth / 4;
     for (int i = 0; i < 4; i++) {
-        SDL_Rect tab = {px + i * tabW, 0, tabW, tabBarHeight};
+        SDL_Rect tab = {px + i * tabW, menuBarHeight, tabW, tabBarHeight};
         if (static_cast<TileCategory>(i) == activeCategory)
             SDL_SetRenderDrawColor(renderer, 80, 130, 200, 255);
         else
@@ -457,7 +682,7 @@ void Game::renderPanel() {
     // Tiles for active category
     auto catTiles = tileLibrary.getByCategory(activeCategory);
     int  cols     = panelWidth / panelTileSize;
-    int  startY   = tabBarHeight - panelScrollY;
+    int  startY   = menuBarHeight + tabBarHeight - panelScrollY; // ✅
 
     for (int i = 0; i < (int)catTiles.size(); i++) {
         int col   = i % cols;
@@ -465,8 +690,8 @@ void Game::renderPanel() {
         int drawX = px + col * panelTileSize;
         int drawY = startY + row * panelTileSize;
 
-        if (drawY + panelTileSize < tabBarHeight) continue;
-        if (drawY > screenHeight - 40)            continue;
+        if (drawY + panelTileSize < menuBarHeight + tabBarHeight) continue; // ✅
+        if (drawY > screenHeight - 40) continue;
 
         tileRenderer.renderTile(renderer, catTiles[i], drawX, drawY,
                                 (float)panelTileSize / catTiles[i].srcW);
@@ -502,6 +727,16 @@ void Game::renderBottomBar() {
         SDL_RenderFillRect(renderer, &r);
         textRenderer.drawCentered(renderer, "Layer " + std::to_string(i + 1), r);
     }
+
+    std::string modeStr = (placementMode == PlacementMode::Grid)
+    ? "Mode: Grid  [Tab]"
+    : "Mode: Free  [Tab]";
+textRenderer.draw(renderer, modeStr,
+    screenWidth - panelWidth - 160,
+    screenHeight - bottomBarHeight + 20,
+    placementMode == PlacementMode::Free
+        ? SDL_Color{100, 220, 100, 255}
+        : SDL_Color{160, 160, 160, 255});
 }
 
 // ── Tileset editor ────────────────────────────────────────────────────────────

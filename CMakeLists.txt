@@ -23,6 +23,15 @@ add_executable(Game1 main.cpp
         Rendering/TileRenderer.cpp
         Rendering/TextRenderer.cpp
         Rendering/TextRenderer.h
+        World/ObjectInstance.h
+        Editor/MapManager.cpp
+        Editor/MapManager.h
+        Editor/TilesetManager.cpp
+        Editor/TilesetManager.h
+        Editor/MenuBar.cpp
+        Editor/MenuBar.h
+        vendor/tinyfiledialogs/tinyfiledialogs.h
+        vendor/tinyfiledialogs/tinyfiledialogs.c
 )
 
 target_include_directories(Game1 PRIVATE
