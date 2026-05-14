@@ -38,8 +38,8 @@ public:
 
 	// Render
 	void render(SDL_Renderer* renderer, const Camera& camera,
-				TileLibrary& library, TileRenderer& tileRenderer,
-				int selectedObjectIndex = -1);
+				 TileLibrary& library, TileRenderer& tileRenderer,
+				 int selectedObjectIndex = -1, bool showGrid = true);
 
 	// Save / load
 	bool save(const std::string& path) const;

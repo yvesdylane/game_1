@@ -135,7 +135,13 @@ private:
     static constexpr int panelWidth     = 200;
     static constexpr int bottomBarHeight = 60;
     static constexpr int tabBarHeight   = 36;   // category tabs at top of panel
-    static constexpr int panelTileSize  = 48;   // tile preview size in panel
+    static constexpr int panelTileSize  = 48;   // tile preview size in pane
+    // helpers
+    std::string openFileDialog(); // wraps zenity on Linux
+    // text rendering
+    TextRenderer textRenderer;
+    bool showGrid = true;  // G key toggles
+    int  hoveredTile = -1; // for hover name display
 
     // ── Methods ───────────────────────────────────────────────────────────────
     void handleEvents();
@@ -155,9 +161,13 @@ private:
     void openTilesetEditor(const std::string& imagePath);
     void commitTilesetEditor(); // saves selected tiles into tileLibrary
 
-    // helpers
-    std::string openFileDialog(); // wraps zenity on Linux
+    // Bulk import
+    void importSingleImage(const std::string& path);
+    void importFolder();
+    void importMultipleImages();
 
-    // text rendering
-    TextRenderer textRenderer;
+    // UI polish helpers
+    void renderCoordinates();   // draws in bottom bar
+    void renderZoomIndicator(); // draws in bottom bar
+
 };

@@ -32,6 +32,9 @@ add_executable(Game1 main.cpp
         Editor/MenuBar.h
         vendor/tinyfiledialogs/tinyfiledialogs.h
         vendor/tinyfiledialogs/tinyfiledialogs.c
+        Editor/FileUtils.h
+        Editor/Toolbar.cpp
+        Editor/Toolbar.h
 )
 
 target_include_directories(Game1 PRIVATE

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstdio>
 #include "tinyfiledialogs.h"
+#include "../Editor/FileUtils.h"
 
 // ── init ─────────────────────────────────────────────────────────────────────
 
@@ -98,116 +99,119 @@ void Game::handleEvents() {
 
         if (e.type == SDL_QUIT) { running = false; }
 
+        if (e.key.keysym.scancode == SDL_SCANCODE_G)
+            showGrid = !showGrid;
+
         // ── Menu bar ──────────────────────────────────────────────────────────────────
-    if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
-        int mx = e.button.x;
-        int my = e.button.y;
+        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+            int mx = e.button.x;
+            int my = e.button.y;
 
-        // Offset my for menu bar height check
-        if (my < menuBarHeight || menuBar.isOpen()) {
-            MenuResult result = menuBar.handleClick(mx, my, mapManager, tilesetManager, screenWidth);
+            // Offset my for menu bar height check
+            if (my < menuBarHeight || menuBar.isOpen()) {
+                MenuResult result = menuBar.handleClick(mx, my, mapManager, tilesetManager, screenWidth);
 
-            switch (result.action) {
+                switch (result.action) {
 
-                case MenuAction::NewMap: {
-                    // Prompt for name via simple input overlay
-                    namingMap    = true;
-                    mapNameInput = "";
-                    SDL_StartTextInput();
-                    break;
-                }
-
-                case MenuAction::SaveMap: {
-                    const MapEntry* entry = mapManager.getActiveEntry();
-                    if (entry) map.save("../Maps/" + entry->file);
-                    break;
-                }
-
-                case MenuAction::SaveMapAs: {
-                    namingMap    = true;
-                    mapNameInput = "";
-                    SDL_StartTextInput();
-                    break;
-                }
-
-                case MenuAction::SwitchMap: {
-                    // Save current first
-                    const MapEntry* cur = mapManager.getActiveEntry();
-                    if (cur) map.save("../Maps/" + cur->file);
-                    // Switch
-                    mapManager.setActive(result.payload);
-                    mapManager.save(MAPS_INDEX);
-                    const MapEntry* next = mapManager.getActiveEntry();
-                    if (next) map.load("../Maps/" + next->file);
-                    break;
-                }
-
-                case MenuAction::LoadTileset: {
-                    const char* filters[] = {"*.tileset"};
-                    const char* result = tinyfd_openFileDialog(
-                        "Select Tileset File",
-                        "../Assets/Tilesets/",
-                        1, filters, "Tileset Files", 0
-                    );
-                    if (result) {
-                        std::string path(result);
-                        std::string fname = path.substr(path.find_last_of("/\\") + 1);
-                        TileLibrary tmp;
-                        if (tmp.load(path)) {
-                            for (auto def : tmp.all()) {
-                                tileRenderer.loadTexture(renderer, def.imagePath);
-                                tileLibrary.addTile(def);
-                            }
-                            tilesetManager.addTileset(fname, fname);
-                            tilesetManager.save(TILESETS_INDEX);
-                        }
+                    case MenuAction::NewMap: {
+                        // Prompt for name via simple input overlay
+                        namingMap    = true;
+                        mapNameInput = "";
+                        SDL_StartTextInput();
+                        break;
                     }
-                    break;
+
+                    case MenuAction::SaveMap: {
+                        const MapEntry* entry = mapManager.getActiveEntry();
+                        if (entry) map.save("../Maps/" + entry->file);
+                        break;
+                    }
+
+                    case MenuAction::SaveMapAs: {
+                        namingMap    = true;
+                        mapNameInput = "";
+                        SDL_StartTextInput();
+                        break;
+                    }
+
+                    case MenuAction::SwitchMap: {
+                        // Save current first
+                        const MapEntry* cur = mapManager.getActiveEntry();
+                        if (cur) map.save("../Maps/" + cur->file);
+                        // Switch
+                        mapManager.setActive(result.payload);
+                        mapManager.save(MAPS_INDEX);
+                        const MapEntry* next = mapManager.getActiveEntry();
+                        if (next) map.load("../Maps/" + next->file);
+                        break;
+                    }
+
+                    case MenuAction::LoadTileset: {
+                        const char* filters[] = {"*.tileset"};
+                        const char* result = tinyfd_openFileDialog(
+                            "Select Tileset File",
+                            "../Assets/Tilesets/",
+                            1, filters, "Tileset Files", 0
+                        );
+                        if (result) {
+                            std::string path(result);
+                            std::string fname = path.substr(path.find_last_of("/\\") + 1);
+                            TileLibrary tmp;
+                            if (tmp.load(path)) {
+                                for (auto def : tmp.all()) {
+                                    tileRenderer.loadTexture(renderer, def.imagePath);
+                                    tileLibrary.addTile(def);
+                                }
+                                tilesetManager.addTileset(fname, fname);
+                                tilesetManager.save(TILESETS_INDEX);
+                            }
+                        }
+                        break;
+                    }
+
+                    case MenuAction::RemoveTileset: {
+                        // For now just remove from index, keep tiles in memory this session
+                        tilesetManager.removeTileset(result.payload);
+                        tilesetManager.save(TILESETS_INDEX);
+                        break;
+                    }
+
+                    default: break;
                 }
 
-                case MenuAction::RemoveTileset: {
-                    // For now just remove from index, keep tiles in memory this session
-                    tilesetManager.removeTileset(result.payload);
-                    tilesetManager.save(TILESETS_INDEX);
-                    break;
+                // If menu bar consumed the click, don't process world clicks
+                if (result.action != MenuAction::None || menuBar.isOpen() || my < menuBarHeight)
+                    continue;
+            }
+        }
+
+        // ── New map naming overlay input ──────────────────────────────────────────────
+        if (namingMap) {
+            if (e.type == SDL_TEXTINPUT)
+                mapNameInput += e.text.text;
+
+            if (e.type == SDL_KEYDOWN) {
+                if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE && !mapNameInput.empty())
+                    mapNameInput.pop_back();
+
+                if (e.key.keysym.scancode == SDL_SCANCODE_RETURN && !mapNameInput.empty()) {
+                    std::string file = MapManager::nameToFile(mapNameInput);
+                    int idx = mapManager.addMap(mapNameInput, file);
+                    mapManager.setActive(idx);
+                    mapManager.save(MAPS_INDEX);
+                    map = Map(); // clear current map
+                    map.init(renderer);
+                    namingMap = false;
+                    SDL_StopTextInput();
                 }
 
-                default: break;
+                if (e.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+                    namingMap = false;
+                    SDL_StopTextInput();
+                }
             }
-
-            // If menu bar consumed the click, don't process world clicks
-            if (result.action != MenuAction::None || menuBar.isOpen() || my < menuBarHeight)
-                continue;
+            continue; // block all other input while naming
         }
-    }
-
-    // ── New map naming overlay input ──────────────────────────────────────────────
-    if (namingMap) {
-        if (e.type == SDL_TEXTINPUT)
-            mapNameInput += e.text.text;
-
-        if (e.type == SDL_KEYDOWN) {
-            if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE && !mapNameInput.empty())
-                mapNameInput.pop_back();
-
-            if (e.key.keysym.scancode == SDL_SCANCODE_RETURN && !mapNameInput.empty()) {
-                std::string file = MapManager::nameToFile(mapNameInput);
-                int idx = mapManager.addMap(mapNameInput, file);
-                mapManager.setActive(idx);
-                mapManager.save(MAPS_INDEX);
-                map = Map(); // clear current map
-                map.init(renderer);
-                namingMap = false;
-                SDL_StopTextInput();
-            }
-
-            if (e.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
-                namingMap = false;
-                SDL_StopTextInput();
-            }
-        }
-        continue; // block all other input while naming
-    }
 
         // ── Tileset editor mode gets its own input ────────────────────────────
         if (editorMode == EditorMode::TilesetEditor) {
@@ -404,13 +408,31 @@ void Game::handleEvents() {
                         activeCategory = static_cast<TileCategory>(tab);
                 }
                 else if (my >= screenHeight - 40) {
-                    std::string path = openFileDialog();
-                    if (!path.empty())
-                        openTilesetEditor(path);
+                    int thirdW   = (panelWidth - 12) / 3;
+                    int localX   = mx - (screenWidth - panelWidth);;
+
+                    if (localX < thirdW + 4) {
+                        // Single image
+                        const char* filters[] = {"*.png"};
+                        const char* result = tinyfd_openFileDialog(
+                            "Select Image", "", 1, filters, "PNG Images", 0);
+                        if (result) {
+                            importSingleImage(result);
+                            tileLibrary.save("../Assets/Tilesets/library.tileset");
+                        }
+                    }
+                    else if (localX < (thirdW + 2) * 2) {
+                        // Multiple images
+                        importMultipleImages();
+                    }
+                    else {
+                        // Folder
+                        importFolder();
+                    }
                 }
                 else {
                     int localX  = mx - (screenWidth - panelWidth);
-                    int localY  = my - tabBarHeight + panelScrollY;
+                    int localY  = my - menuBarHeight - tabBarHeight + panelScrollY;
                     int cols    = panelWidth / panelTileSize;
                     int col     = localX / panelTileSize;
                     int row     = localY / panelTileSize;
@@ -525,6 +547,7 @@ void Game::handleEvents() {
         }
     }
 }
+
 // ── paintTileAtMouse ─────────────────────────────────────────────────────────
 
 void Game::paintTileAtMouse() {
@@ -593,7 +616,7 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
     SDL_RenderClear(renderer);
 
-    map.render(renderer, camera, tileLibrary, tileRenderer, selectedObject);
+    map.render(renderer, camera, tileLibrary, tileRenderer, selectedObject, showGrid);
 
     // Ghost preview
     int mx, my;
@@ -701,11 +724,65 @@ void Game::renderPanel() {
         }
     }
 
-    // "+ Import" button
-    SDL_Rect importBtn = {px + 10, screenHeight - 36, panelWidth - 20, 28};
+    // Hover detection + name display
+    hoveredTile = -1;
+    int hx, hy;
+    SDL_GetMouseState(&hx, &hy);
+
+    if (hx >= px && hx < screenWidth &&
+        hy > menuBarHeight + tabBarHeight && hy < screenHeight - 40) {
+
+        int localX = hx - px;
+        int localY = hy - (menuBarHeight + tabBarHeight) + panelScrollY;
+        int col    = localX / panelTileSize;
+        int row    = localY / panelTileSize;
+        int idx    = row * (panelWidth / panelTileSize) + col;
+
+        if (idx >= 0 && idx < (int)catTiles.size()) {
+            hoveredTile = catTiles[idx].id;
+
+            // Hover highlight
+            int drawX = px + (idx % (panelWidth / panelTileSize)) * panelTileSize;
+            int drawY = menuBarHeight + tabBarHeight - panelScrollY
+                      + (idx / (panelWidth / panelTileSize)) * panelTileSize;
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
+            SDL_Rect hoverRect = {drawX, drawY, panelTileSize, panelTileSize};
+            SDL_RenderFillRect(renderer, &hoverRect);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+            // Name at bottom of panel
+            const TileDefinition* def = tileLibrary.getById(hoveredTile);
+            if (def && !def->label.empty()) {
+                SDL_Rect nameBg = {px, screenHeight - 60, panelWidth, 20};
+                SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+                SDL_RenderFillRect(renderer, &nameBg);
+                textRenderer.drawCentered(renderer, def->label, nameBg,
+                                          {200, 200, 200, 255});
+            }
+        }
+        }
+
+    // Three import buttons at bottom of panel
+    const int btnY      = screenHeight - 38;
+    const int btnH      = 28;
+    const int thirdW    = (panelWidth - 12) / 3;
+
+    SDL_Rect btn1 = {px + 4,              btnY, thirdW, btnH};
+    SDL_Rect btn2 = {px + 4 + thirdW + 2, btnY, thirdW, btnH};
+    SDL_Rect btn3 = {px + 4 + (thirdW + 2) * 2, btnY, thirdW, btnH};
+
     SDL_SetRenderDrawColor(renderer, 60, 100, 60, 255);
-    SDL_RenderFillRect(renderer, &importBtn);
-    textRenderer.drawCentered(renderer, "+ Import", importBtn);
+    SDL_RenderFillRect(renderer, &btn1);
+    textRenderer.drawCentered(renderer, "Image", btn1);
+
+    SDL_SetRenderDrawColor(renderer, 60, 80, 120, 255);
+    SDL_RenderFillRect(renderer, &btn2);
+    textRenderer.drawCentered(renderer, "Multi", btn2);
+
+    SDL_SetRenderDrawColor(renderer, 80, 60, 120, 255);
+    SDL_RenderFillRect(renderer, &btn3);
+    textRenderer.drawCentered(renderer, "Folder", btn3);
 }
 
 // ── renderBottomBar ──────────────────────────────────────────────────────────
@@ -716,8 +793,9 @@ void Game::renderBottomBar() {
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &bar);
 
+    // Layer buttons — unchanged
     for (int i = 0; i < 5; i++) {
-        SDL_Rect r = {20 + i * 120, screenHeight - 50, 100, 36};
+        SDL_Rect r = {20 + i * 80, screenHeight - 50, 70, 36};
         if (i == selectedLayer)
             SDL_SetRenderDrawColor(renderer, 200, 180, 50, 255);
         else
@@ -726,15 +804,57 @@ void Game::renderBottomBar() {
         textRenderer.drawCentered(renderer, "Layer " + std::to_string(i + 1), r);
     }
 
-    std::string modeStr = (placementMode == PlacementMode::Grid)
-    ? "Mode: Grid  [Tab]"
-    : "Mode: Free  [Tab]";
-textRenderer.draw(renderer, modeStr,
-    screenWidth - panelWidth - 160,
-    screenHeight - bottomBarHeight + 20,
-    placementMode == PlacementMode::Free
+    // ── Right side indicators ─────────────────────────────────────────────────
+    int mx, my;
+    SDL_GetMouseState(&mx, &my);
+    float worldX = camera.x + mx / camera.zoom;
+    float worldY = camera.y + my / camera.zoom;
+    int   tileX  = static_cast<int>(worldX / TILE_SIZE);
+    int   tileY  = static_cast<int>(worldY / TILE_SIZE);
+
+    // World pixel coordinates
+    std::string coordStr = "px " + std::to_string((int)worldX)
+                         + ", " + std::to_string((int)worldY);
+    textRenderer.draw(renderer, coordStr,
+        screenWidth - panelWidth - 320,
+        screenHeight - bottomBarHeight + 8,
+        {140, 140, 140, 255});
+
+    // Tile coordinates
+    std::string tileStr = "tile " + std::to_string(tileX)
+                        + ", "    + std::to_string(tileY);
+    textRenderer.draw(renderer, tileStr,
+        screenWidth - panelWidth - 320,
+        screenHeight - bottomBarHeight + 24,
+        {160, 160, 160, 255});
+
+    // Zoom %
+    std::string zoomStr = "Zoom " + std::to_string((int)(camera.zoom * 100)) + "%";
+    textRenderer.draw(renderer, zoomStr,
+        screenWidth - panelWidth - 160,
+        screenHeight - bottomBarHeight + 8,
+        {140, 140, 140, 255});
+
+    // Placement mode
+    std::string modeStr = placementMode == PlacementMode::Free
+        ? "Free [Tab]" : "Grid [Tab]";
+    SDL_Color modeColor = placementMode == PlacementMode::Free
         ? SDL_Color{100, 220, 100, 255}
-        : SDL_Color{160, 160, 160, 255});
+        : SDL_Color{160, 160, 160, 255};
+    textRenderer.draw(renderer, modeStr,
+        screenWidth - panelWidth - 160,
+        screenHeight - bottomBarHeight + 24,
+        modeColor);
+
+    // Grid toggle hint
+    std::string gridStr = showGrid ? "Grid: ON  [G]" : "Grid: OFF [G]";
+    SDL_Color gridColor = showGrid
+        ? SDL_Color{100, 200, 100, 255}
+        : SDL_Color{120, 120, 120, 255};
+    textRenderer.draw(renderer, gridStr,
+        screenWidth - panelWidth - 160,
+        screenHeight - bottomBarHeight + 40,
+        gridColor);
 }
 
 // ── Tileset editor ────────────────────────────────────────────────────────────
@@ -924,6 +1044,102 @@ void Game::renderTilesetEditor() {
     SDL_SetRenderDrawColor(renderer, 140, 60, 60, 255);
     SDL_RenderFillRect(renderer, &cancelBtn);
     textRenderer.drawCentered(renderer, "Cancel", cancelBtn);
+}
+
+void Game::importSingleImage(const std::string& path) {
+    if (path.empty()) return;
+    if (!tileRenderer.loadTexture(renderer, path)) return;
+
+    SDL_Texture* tex = tileRenderer.getTexture(path);
+    int w, h;
+    SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
+
+    if (tsEditor.mode == TilesetEditorMode::SingleObject) {
+        // Whole image as one tile
+        TileDefinition def;
+        def.imagePath = path;
+        def.srcX      = 0;
+        def.srcY      = 0;
+        def.srcW      = w;
+        def.srcH      = h;
+        def.tileW     = std::max(1, w / TILE_SIZE);
+        def.tileH     = std::max(1, h / TILE_SIZE);
+        def.category  = tsEditor.category;
+        def.label     = FileUtils::stemName(path);
+        tileLibrary.addTile(def);
+
+    } else {
+        // Grid mode — cut into tiles using current tsEditor size
+        int tw = tsEditor.tileW;
+        int th = tsEditor.tileH;
+        int cols = std::max(1, w / tw);
+        int rows = std::max(1, h / th);
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                TileDefinition def;
+                def.imagePath = path;
+                def.srcX      = col * tw;
+                def.srcY      = row * th;
+                def.srcW      = tw;
+                def.srcH      = th;
+                def.tileW     = std::max(1, tw / TILE_SIZE);
+                def.tileH     = std::max(1, th / TILE_SIZE);
+                def.category  = tsEditor.category;
+                def.label     = FileUtils::stemName(path);
+                tileLibrary.addTile(def);
+            }
+        }
+    }
+}
+
+// import logic
+void Game::importFolder() {
+    // Open folder picker
+    const char* result = tinyfd_selectFolderDialog("Select Image Folder", "");
+    if (!result) return;
+
+    auto pngs = FileUtils::getPNGsInFolder(result);
+    int count = 0;
+    for (const auto& path : pngs) {
+        importSingleImage(path);
+        count++;
+    }
+
+    // Save library after batch
+    tileLibrary.save("../Assets/Tilesets/library.tileset");
+    std::cout << "Imported " << count << " images from folder\n";
+}
+
+void Game::importMultipleImages() {
+    // tinyfd multi-select
+    const char* filters[] = {"*.png", "*.PNG"};
+    const char* result = tinyfd_openFileDialog(
+        "Select Images",
+        "",
+        2, filters,
+        "PNG Images",
+        1  // ← 1 = allow multiple select
+    );
+    if (!result) return;
+
+    // tinyfd returns multiple files separated by '|'
+    std::string all(result);
+    std::vector<std::string> paths;
+    size_t pos = 0;
+    while ((pos = all.find('|')) != std::string::npos) {
+        paths.push_back(all.substr(0, pos));
+        all.erase(0, pos + 1);
+    }
+    if (!all.empty()) paths.push_back(all);
+
+    int count = 0;
+    for (const auto& path : paths) {
+        importSingleImage(path);
+        count++;
+    }
+
+    tileLibrary.save("../Assets/Tilesets/library.tileset");
+    std::cout << "Imported " << count << " images\n";
 }
 
 // ── openFileDialog ────────────────────────────────────────────────────────────

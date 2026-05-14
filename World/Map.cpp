@@ -45,14 +45,13 @@ void Map::removeObject(int index) {
 
 void Map::render(SDL_Renderer* renderer, const Camera& camera,
                  TileLibrary& library, TileRenderer& tileRenderer,
-                 int selectedObjectIndex) {
+                 int selectedObjectIndex, bool showGrid) { // ← add showGrid
 
     int startX = std::max(0, (int)(camera.x / TILE_SIZE));
     int startY = std::max(0, (int)(camera.y / TILE_SIZE));
     int endX   = std::min(MAP_WIDTH,  (int)((camera.x + 1280 / camera.zoom) / TILE_SIZE) + 2);
     int endY   = std::min(MAP_HEIGHT, (int)((camera.y + 720  / camera.zoom) / TILE_SIZE) + 2);
 
-    // ── Tile grid layers ──────────────────────────────────────────────────────
     for (int layer = 0; layer < LAYER_COUNT; layer++) {
         for (int y = startY; y < endY; y++) {
             for (int x = startX; x < endX; x++) {
@@ -60,8 +59,8 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera,
                 int screenX = static_cast<int>((x * TILE_SIZE - camera.x) * camera.zoom);
                 int screenY = static_cast<int>((y * TILE_SIZE - camera.y) * camera.zoom);
 
-                // Grid outline on layer 0
-                if (layer == 0) {
+                // ✅ Only draw grid on layer 0 when showGrid is true
+                if (layer == 0 && showGrid) {
                     SDL_Rect rect = {
                         screenX, screenY,
                         static_cast<int>(TILE_SIZE * camera.zoom),
@@ -82,7 +81,7 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera,
         }
     }
 
-    // ── Objects (drawn on top of all tile layers) ─────────────────────────────
+    // Objects — unchanged
     for (int i = 0; i < (int)objects.size(); i++) {
         const ObjectInstance& obj = objects[i];
 
@@ -92,7 +91,6 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera,
         int screenX = static_cast<int>((obj.x - camera.x) * camera.zoom);
         int screenY = static_cast<int>((obj.y - camera.y) * camera.zoom);
 
-        // Skip if fully off screen
         int drawW = static_cast<int>(def->srcW * camera.zoom);
         int drawH = static_cast<int>(def->srcH * camera.zoom);
         if (screenX + drawW < 0 || screenX > 1280) continue;
@@ -100,7 +98,6 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera,
 
         tileRenderer.renderTile(renderer, *def, screenX, screenY, camera.zoom);
 
-        // Highlight selected object
         if (i == selectedObjectIndex) {
             SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer, 255, 220, 0, 60);
