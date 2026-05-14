@@ -11,6 +11,7 @@
 #include "../Editor/MenuBar.h"
 #include "../Editor/MapManager.h"
 #include "../Editor/TilesetManager.h"
+#include "../Editor/Toolbar.h"
 
 // ── Editor mode ───────────────────────────────────────────────────────────────
 enum class EditorMode {
@@ -119,7 +120,10 @@ private:
     MapManager     mapManager;
     TilesetManager tilesetManager;
 
-    static constexpr int menuBarHeight = MenuBar::HEIGHT;
+    static constexpr int menuBarHeight  = MenuBar::HEIGHT;
+    static constexpr int toolbarStartX  = 200; // after menu tabs
+    // Total top UI height
+    static constexpr int topBarHeight   = MenuBar::HEIGHT; // toolbar lives IN menu bar row
 
     // For "New Map" / "Save As" name input
     bool        namingMap    = false;
@@ -142,6 +146,12 @@ private:
     TextRenderer textRenderer;
     bool showGrid = true;  // G key toggles
     int  hoveredTile = -1; // for hover name display
+
+    Toolbar  toolbar;
+    ToolMode toolMode = ToolMode::Paint;
+    // For multi-image import queue
+    std::vector<std::string> pendingImports; // images waiting to go through editor
+    int                      pendingImportIndex = 0;
 
     // ── Methods ───────────────────────────────────────────────────────────────
     void handleEvents();
@@ -169,5 +179,12 @@ private:
     // UI polish helpers
     void renderCoordinates();   // draws in bottom bar
     void renderZoomIndicator(); // draws in bottom bar
+
+    bool handleMenuEvents(const SDL_Event& e);
+    void handleTilesetEditorEvents(const SDL_Event& e);
+    void handlePaintModeEvents(const SDL_Event& e, const Uint8* keys);
+    void handleNamingInput(const SDL_Event& e);
+    void advancePendingImport();
+    void handlePanelClick(int mx, int my);
 
 };
