@@ -618,9 +618,24 @@ void Game::eraseTileAtMouse() {
     float worldX = camera.x + mx / camera.zoom;
     float worldY = camera.y + my / camera.zoom;
 
+    // ✅ Check objects first (they're on top visually)
+    const auto& objects = map.getObjects();
+    for (int i = (int)objects.size() - 1; i >= 0; i--) {
+        const ObjectInstance& obj = objects[i];
+        const TileDefinition* def = tileLibrary.getById(obj.tileID);
+        if (!def) continue;
+        if (worldX >= obj.x && worldX <= obj.x + def->srcW &&
+            worldY >= obj.y && worldY <= obj.y + def->srcH) {
+            map.removeObject(i);
+            if (selectedObject == i) selectedObject = -1;
+            else if (selectedObject > i) selectedObject--;
+            return; // erase one thing at a time
+            }
+    }
+
+    // ✅ Then clear grid tile
     int tileX = static_cast<int>(worldX / TILE_SIZE);
     int tileY = static_cast<int>(worldY / TILE_SIZE);
-
     map.clearTile(selectedLayer, tileX, tileY);
 }
 // ── update ───────────────────────────────────────────────────────────────────
