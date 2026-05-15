@@ -12,6 +12,8 @@
 #include "../Editor/MapManager.h"
 #include "../Editor/TilesetManager.h"
 #include "../Editor/Toolbar.h"
+#include "../Editor/UndoSystem.h"
+#include "../Editor/LayerState.h"
 
 // ── Editor mode ───────────────────────────────────────────────────────────────
 enum class EditorMode {
@@ -152,6 +154,9 @@ private:
     // For multi-image import queue
     std::vector<std::string> pendingImports; // images waiting to go through editor
     int                      pendingImportIndex = 0;
+    UndoSystem undoSystem;
+    LayerState layerStates[5]; // one per layer
+    bool       strokeActive = false;
 
     // ── Methods ───────────────────────────────────────────────────────────────
     void handleEvents();
@@ -186,5 +191,12 @@ private:
     void handleNamingInput(const SDL_Event& e);
     void advancePendingImport();
     void handlePanelClick(int mx, int my);
+
+    void applyUndo(const StrokeCommand& cmd);
+    void applyUndo(const PlaceObjectCommand& cmd);
+    void applyUndo(const RemoveObjectCommand& cmd);
+    void applyRedo(const StrokeCommand& cmd);
+    void applyRedo(const PlaceObjectCommand& cmd);
+    void applyRedo(const RemoveObjectCommand& cmd);
 
 };

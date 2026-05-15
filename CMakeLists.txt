@@ -35,6 +35,9 @@ add_executable(Game1 main.cpp
         Editor/FileUtils.h
         Editor/Toolbar.cpp
         Editor/Toolbar.h
+        Editor/LayerState.h
+        Editor/UndoSystem.h
+        Editor/UndoSystem.cpp
 )
 
 target_include_directories(Game1 PRIVATE

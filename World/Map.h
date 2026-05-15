@@ -13,6 +13,7 @@
 #include "../Rendering/TileRenderer.h"
 #include "../World/TileLibrary.h"
 #include "../World/ObjectInstance.h"
+#include "../Editor/LayerState.h"
 
 constexpr int MAP_WIDTH  = 100;
 constexpr int MAP_HEIGHT = 100;
@@ -37,13 +38,13 @@ public:
 	const std::vector<ObjectInstance>& getObjects() const { return objects; }
 
 	// Render
-	void render(SDL_Renderer* renderer, const Camera& camera,
-				 TileLibrary& library, TileRenderer& tileRenderer,
-				 int selectedObjectIndex = -1, bool showGrid = true);
+	void render(SDL_Renderer* renderer, const Camera& camera, TileLibrary& library, TileRenderer& tileRenderer,
+				 int selectedObjectIndex = -1, bool showGrid = true, const LayerState* layerStates = nullptr);
 
 	// Save / load
 	bool save(const std::string& path) const;
 	bool load(const std::string& path);
+	void insertObject(int index, const ObjectInstance& obj);
 
 private:
 	int tiles[LAYER_COUNT][MAP_HEIGHT][MAP_WIDTH];

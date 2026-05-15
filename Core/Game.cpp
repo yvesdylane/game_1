@@ -381,6 +381,7 @@ void Game::handleNamingInput(const SDL_Event& e) {
 
 void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
 
+    // ── Keyboard ──────────────────────────────────────────────────────────────
     if (e.type == SDL_KEYDOWN) {
         if (e.key.keysym.scancode == SDL_SCANCODE_S && keys[SDL_SCANCODE_LCTRL]) {
             const MapEntry* entry = mapManager.getActiveEntry();
@@ -396,48 +397,90 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
             selectedObject = -1;
         }
         if (e.key.keysym.scancode == SDL_SCANCODE_DELETE && selectedObject >= 0) {
+            undoSystem.recordRemoveObject(selectedObject,
+                map.getObjects()[selectedObject]);
             map.removeObject(selectedObject);
             selectedObject = -1;
         }
+
         // Tool shortcuts
         if (e.key.keysym.scancode == SDL_SCANCODE_H) toolMode = ToolMode::Hand;
         if (e.key.keysym.scancode == SDL_SCANCODE_P) toolMode = ToolMode::Paint;
         if (e.key.keysym.scancode == SDL_SCANCODE_E) toolMode = ToolMode::Eraser;
+
+        // ✅ Undo/redo inside SDL_KEYDOWN where scancode is valid
+        if (e.key.keysym.scancode == SDL_SCANCODE_Z && keys[SDL_SCANCODE_LCTRL]) {
+            if (keys[SDL_SCANCODE_LSHIFT]) {
+                if (undoSystem.canRedo()) {
+                    Command cmd = undoSystem.redo();
+                    std::visit([&](auto&& c) { applyRedo(c); }, cmd);
+                }
+            } else {
+                if (undoSystem.canUndo()) {
+                    Command cmd = undoSystem.undo();
+                    std::visit([&](auto&& c) { applyUndo(c); }, cmd);
+                }
+            }
+        }
+        if (e.key.keysym.scancode == SDL_SCANCODE_Y && keys[SDL_SCANCODE_LCTRL]) {
+            if (undoSystem.canRedo()) {
+                Command cmd = undoSystem.redo();
+                std::visit([&](auto&& c) { applyRedo(c); }, cmd);
+            }
+        }
     }
 
+    // ── Left click ────────────────────────────────────────────────────────────
     if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx = e.button.x;
         int my = e.button.y;
         bool consumed = false;
 
-        // ── Right panel ───────────────────────────────────────────────────────
+        // Right panel
         if (mx >= screenWidth - panelWidth) {
             consumed = true;
             handlePanelClick(mx, my);
         }
 
-        // ── Bottom bar ────────────────────────────────────────────────────────
+        // ✅ Bottom bar — layer select + eye/lock — all here where mx/my/consumed exist
         if (!consumed && my >= screenHeight - bottomBarHeight) {
             for (int i = 0; i < 5; i++) {
-                SDL_Rect r = {20 + i * 80, screenHeight - 50, 70, 36};
+                int bx = 10 + i * 90;
+                int by = screenHeight - 54;
+
+                SDL_Rect r    = {bx,      by,      70, 20};
+                SDL_Rect eye  = {bx,      by + 22, 33, 16};
+                SDL_Rect lock = {bx + 35, by + 22, 33, 16};
+
+                if (mx >= eye.x && mx <= eye.x + eye.w &&
+                    my >= eye.y && my <= eye.y + eye.h) {
+                    layerStates[i].visible = !layerStates[i].visible;
+                    consumed = true; break;
+                }
+                if (mx >= lock.x && mx <= lock.x + lock.w &&
+                    my >= lock.y && my <= lock.y + lock.h) {
+                    layerStates[i].locked = !layerStates[i].locked;
+                    consumed = true; break;
+                }
                 if (mx >= r.x && mx <= r.x + r.w &&
                     my >= r.y && my <= r.y + r.h) {
                     selectedLayer = i;
-                    consumed = true;
-                    break;
+                    consumed = true; break;
                 }
             }
         }
 
-        // ── World ─────────────────────────────────────────────────────────────
+        // World
         if (!consumed && my > menuBarHeight) {
+            if (toolMode == ToolMode::Paint || toolMode == ToolMode::Eraser)
+                undoSystem.beginStroke(toolMode == ToolMode::Eraser);
+
             if (toolMode == ToolMode::Hand || keys[SDL_SCANCODE_SPACE]) {
                 dragging = true;
                 SDL_GetMouseState(&lastMouseX, &lastMouseY);
             } else if (toolMode == ToolMode::Eraser) {
                 eraseTileAtMouse();
             } else {
-                // Paint — check object selection first
                 float worldX = camera.x + mx / camera.zoom;
                 float worldY = camera.y + my / camera.zoom;
                 bool clickedObject = false;
@@ -462,21 +505,29 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
         }
     }
 
+    // ── Right click erase ─────────────────────────────────────────────────────
     if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_RIGHT) {
         int mx = e.button.x;
         int my = e.button.y;
         if (mx < screenWidth - panelWidth &&
             my > menuBarHeight &&
-            my < screenHeight - bottomBarHeight)
+            my < screenHeight - bottomBarHeight) {
+            undoSystem.beginStroke(true);
             eraseTileAtMouse();
+            undoSystem.endStroke();
+        }
     }
 
-    if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT)
+    // ── Mouse button up ───────────────────────────────────────────────────────
+    if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
+        undoSystem.endStroke();
         dragging = false;
+    }
 
     if (e.type == SDL_KEYUP && e.key.keysym.scancode == SDL_SCANCODE_SPACE)
         dragging = false;
 
+    // ── Mouse motion ──────────────────────────────────────────────────────────
     if (e.type == SDL_MOUSEMOTION) {
         if (dragging && (toolMode == ToolMode::Hand || keys[SDL_SCANCODE_SPACE])) {
             int mx, my;
@@ -497,6 +548,7 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
             eraseTileAtMouse();
     }
 
+    // ── Scroll / zoom ─────────────────────────────────────────────────────────
     if (e.type == SDL_MOUSEWHEEL) {
         int mx, my;
         SDL_GetMouseState(&mx, &my);
@@ -573,6 +625,10 @@ void Game::paintTileAtMouse() {
     if (my >= screenHeight - bottomBarHeight) return;
     if (my < menuBarHeight) return;
 
+    // ✅ Check layer is not locked or hidden
+    if (layerStates[selectedLayer].locked)  return;
+    if (!layerStates[selectedLayer].visible) return;
+
     const TileDefinition* def = tileLibrary.getById(selectedTile);
     if (!def) return;
 
@@ -581,44 +637,42 @@ void Game::paintTileAtMouse() {
 
     if (def->category == TileCategory::Object ||
         placementMode == PlacementMode::Free) {
-        // Free placement — pixel position
         float snapX = worldX;
         float snapY = worldY;
-
         if (placementMode == PlacementMode::Grid) {
-            // Still snap to grid even for objects if in grid mode
             snapX = static_cast<int>(worldX / TILE_SIZE) * TILE_SIZE;
             snapY = static_cast<int>(worldY / TILE_SIZE) * TILE_SIZE;
         }
-
         ObjectInstance obj;
         obj.tileID = selectedTile;
         obj.x      = snapX;
         obj.y      = snapY;
         obj.layer  = selectedLayer;
-        map.addObject(obj);
-
-        } else {
-            // Grid tile placement for terrain/decoration/resource
-            int tileX = static_cast<int>(worldX / TILE_SIZE);
-            int tileY = static_cast<int>(worldY / TILE_SIZE);
-            map.setTile(selectedLayer, tileX, tileY, selectedTile);
-        }
+        int idx = map.addObject(obj);
+        undoSystem.recordPlaceObject(idx, obj); // ✅
+    } else {
+        int tileX = static_cast<int>(worldX / TILE_SIZE);
+        int tileY = static_cast<int>(worldY / TILE_SIZE);
+        int oldID = map.getTile(selectedLayer, tileX, tileY);
+        undoSystem.recordTile(selectedLayer, tileX, tileY, oldID, selectedTile); // ✅
+        map.setTile(selectedLayer, tileX, tileY, selectedTile);
+    }
 }
 
 //method for erasing
 void Game::eraseTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-
     if (mx >= screenWidth - panelWidth) return;
     if (my >= screenHeight - bottomBarHeight) return;
     if (my < menuBarHeight) return;
 
+    if (layerStates[selectedLayer].locked) return;
+
     float worldX = camera.x + mx / camera.zoom;
     float worldY = camera.y + my / camera.zoom;
 
-    // ✅ Check objects first (they're on top visually)
+    // Check objects first
     const auto& objects = map.getObjects();
     for (int i = (int)objects.size() - 1; i >= 0; i--) {
         const ObjectInstance& obj = objects[i];
@@ -626,20 +680,24 @@ void Game::eraseTileAtMouse() {
         if (!def) continue;
         if (worldX >= obj.x && worldX <= obj.x + def->srcW &&
             worldY >= obj.y && worldY <= obj.y + def->srcH) {
+            undoSystem.recordRemoveObject(i, obj); // ✅
             map.removeObject(i);
             if (selectedObject == i) selectedObject = -1;
             else if (selectedObject > i) selectedObject--;
-            return; // erase one thing at a time
+            return;
             }
     }
 
-    // ✅ Then clear grid tile
     int tileX = static_cast<int>(worldX / TILE_SIZE);
     int tileY = static_cast<int>(worldY / TILE_SIZE);
-    map.clearTile(selectedLayer, tileX, tileY);
+    int oldID = map.getTile(selectedLayer, tileX, tileY);
+    if (oldID != Map::TILE_EMPTY) {
+        undoSystem.recordTile(selectedLayer, tileX, tileY, oldID, Map::TILE_EMPTY); // ✅
+        map.clearTile(selectedLayer, tileX, tileY);
+    }
 }
-// ── update ───────────────────────────────────────────────────────────────────
 
+// ── update ───────────────────────────────────────────────────────────────────
 void Game::update(float) {}
 
 // ── render ───────────────────────────────────────────────────────────────────
@@ -648,7 +706,7 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
     SDL_RenderClear(renderer);
 
-    map.render(renderer, camera, tileLibrary, tileRenderer, selectedObject, showGrid);
+    map.render(renderer, camera, tileLibrary, tileRenderer, selectedObject, showGrid, layerStates);
 
     // Ghost preview
     int mx, my;
@@ -832,18 +890,59 @@ void Game::renderBottomBar() {
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &bar);
 
-    // Layer buttons — unchanged
     for (int i = 0; i < 5; i++) {
-        SDL_Rect r = {20 + i * 80, screenHeight - 50, 70, 36};
+        int bx = 10 + i * 90;
+        int by = screenHeight - 54;
+
+        // Main layer button
+        SDL_Rect r = {bx, by, 70, 20};
         if (i == selectedLayer)
             SDL_SetRenderDrawColor(renderer, 200, 180, 50, 255);
+        else if (!layerStates[i].visible)
+            SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         else
             SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
         SDL_RenderFillRect(renderer, &r);
         textRenderer.drawCentered(renderer, "Layer " + std::to_string(i + 1), r);
+
+        // Eye toggle
+        SDL_Rect eye = {bx, by + 22, 33, 16};
+        SDL_SetRenderDrawColor(renderer,
+            layerStates[i].visible ? 60 : 30,
+            layerStates[i].visible ? 120 : 30,
+            layerStates[i].visible ? 60  : 30, 255);
+        SDL_RenderFillRect(renderer, &eye);
+        textRenderer.drawCentered(renderer,
+            layerStates[i].visible ? "Show" : "Hide", eye,
+            {200, 200, 200, 255});
+
+        // Lock toggle
+        SDL_Rect lock = {bx + 35, by + 22, 33, 16};
+        SDL_SetRenderDrawColor(renderer,
+            layerStates[i].locked ? 120 : 30,
+            layerStates[i].locked ? 60  : 30,
+            30, 255);
+        SDL_RenderFillRect(renderer, &lock);
+        textRenderer.drawCentered(renderer,
+            layerStates[i].locked ? "Lock" : "Free", lock,
+            {200, 200, 200, 255});
     }
 
-    // ── Right side indicators ─────────────────────────────────────────────────
+    // Undo/redo indicators
+    SDL_Color undoColor = undoSystem.canUndo()
+        ? SDL_Color{200, 200, 200, 255}
+        : SDL_Color{60,  60,  60,  255};
+    SDL_Color redoColor = undoSystem.canRedo()
+        ? SDL_Color{200, 200, 200, 255}
+        : SDL_Color{60,  60,  60,  255};
+    textRenderer.draw(renderer, "Ctrl+Z Undo",
+        screenWidth - panelWidth - 320,
+        screenHeight - bottomBarHeight + 42, undoColor);
+    textRenderer.draw(renderer, "Ctrl+Y Redo",
+        screenWidth - panelWidth - 200,
+        screenHeight - bottomBarHeight + 42, redoColor);
+
+    // Coordinates + zoom — unchanged from before
     int mx, my;
     SDL_GetMouseState(&mx, &my);
     float worldX = camera.x + mx / camera.zoom;
@@ -851,49 +950,18 @@ void Game::renderBottomBar() {
     int   tileX  = static_cast<int>(worldX / TILE_SIZE);
     int   tileY  = static_cast<int>(worldY / TILE_SIZE);
 
-    // World pixel coordinates
-    std::string coordStr = "px " + std::to_string((int)worldX)
-                         + ", " + std::to_string((int)worldY);
-    textRenderer.draw(renderer, coordStr,
-        screenWidth - panelWidth - 320,
-        screenHeight - bottomBarHeight + 8,
+    textRenderer.draw(renderer,
+        "px " + std::to_string((int)worldX) + ", " + std::to_string((int)worldY),
+        screenWidth - panelWidth - 320, screenHeight - bottomBarHeight + 8,
         {140, 140, 140, 255});
-
-    // Tile coordinates
-    std::string tileStr = "tile " + std::to_string(tileX)
-                        + ", "    + std::to_string(tileY);
-    textRenderer.draw(renderer, tileStr,
-        screenWidth - panelWidth - 320,
-        screenHeight - bottomBarHeight + 24,
+    textRenderer.draw(renderer,
+        "tile " + std::to_string(tileX) + ", " + std::to_string(tileY),
+        screenWidth - panelWidth - 320, screenHeight - bottomBarHeight + 24,
         {160, 160, 160, 255});
-
-    // Zoom %
-    std::string zoomStr = "Zoom " + std::to_string((int)(camera.zoom * 100)) + "%";
-    textRenderer.draw(renderer, zoomStr,
-        screenWidth - panelWidth - 160,
-        screenHeight - bottomBarHeight + 8,
+    textRenderer.draw(renderer,
+        "Zoom " + std::to_string((int)(camera.zoom * 100)) + "%",
+        screenWidth - panelWidth - 160, screenHeight - bottomBarHeight + 8,
         {140, 140, 140, 255});
-
-    // Placement mode
-    std::string modeStr = placementMode == PlacementMode::Free
-        ? "Free [Tab]" : "Grid [Tab]";
-    SDL_Color modeColor = placementMode == PlacementMode::Free
-        ? SDL_Color{100, 220, 100, 255}
-        : SDL_Color{160, 160, 160, 255};
-    textRenderer.draw(renderer, modeStr,
-        screenWidth - panelWidth - 160,
-        screenHeight - bottomBarHeight + 24,
-        modeColor);
-
-    // Grid toggle hint
-    std::string gridStr = showGrid ? "Grid: ON  [G]" : "Grid: OFF [G]";
-    SDL_Color gridColor = showGrid
-        ? SDL_Color{100, 200, 100, 255}
-        : SDL_Color{120, 120, 120, 255};
-    textRenderer.draw(renderer, gridStr,
-        screenWidth - panelWidth - 160,
-        screenHeight - bottomBarHeight + 40,
-        gridColor);
 }
 
 // ── Tileset editor ────────────────────────────────────────────────────────────
@@ -1181,6 +1249,35 @@ void Game::advancePendingImport() {
         // Open editor for this image
         openTilesetEditor(path);
     }
+}
+
+// undo redo
+void Game::applyUndo(const StrokeCommand& cmd) {
+    for (const auto& t : cmd.tiles)
+        map.setTile(t.layer, t.x, t.y, t.oldTileID);
+}
+
+void Game::applyRedo(const StrokeCommand& cmd) {
+    for (const auto& t : cmd.tiles)
+        map.setTile(t.layer, t.x, t.y, t.newTileID);
+}
+
+void Game::applyUndo(const PlaceObjectCommand& cmd) {
+    map.removeObject(cmd.objectIndex);
+    if (selectedObject == cmd.objectIndex) selectedObject = -1;
+}
+
+void Game::applyRedo(const PlaceObjectCommand& cmd) {
+    map.addObject(cmd.object);
+}
+
+void Game::applyUndo(const RemoveObjectCommand& cmd) {
+    // Re-insert at original index
+    map.insertObject(cmd.objectIndex, cmd.object);
+}
+
+void Game::applyRedo(const RemoveObjectCommand& cmd) {
+    map.removeObject(cmd.objectIndex);
 }
 
 // ── openFileDialog ────────────────────────────────────────────────────────────

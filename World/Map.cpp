@@ -43,9 +43,8 @@ void Map::removeObject(int index) {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
-void Map::render(SDL_Renderer* renderer, const Camera& camera,
-                 TileLibrary& library, TileRenderer& tileRenderer,
-                 int selectedObjectIndex, bool showGrid) { // ← add showGrid
+void Map::render(SDL_Renderer* renderer, const Camera& camera, TileLibrary& library, TileRenderer& tileRenderer,
+                 int selectedObjectIndex, bool showGrid, const LayerState* layerStates) { // ← add showGrid
 
     int startX = std::max(0, (int)(camera.x / TILE_SIZE));
     int startY = std::max(0, (int)(camera.y / TILE_SIZE));
@@ -53,6 +52,7 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera,
     int endY   = std::min(MAP_HEIGHT, (int)((camera.y + 720  / camera.zoom) / TILE_SIZE) + 2);
 
     for (int layer = 0; layer < LAYER_COUNT; layer++) {
+        if (layerStates && !layerStates[layer].visible) continue;
         for (int y = startY; y < endY; y++) {
             for (int x = startX; x < endX; x++) {
 
@@ -174,4 +174,11 @@ bool Map::load(const std::string& path) {
 
     std::cout << "Map loaded: " << objCount << " objects\n";
     return true;
+}
+
+void Map::insertObject(int index, const ObjectInstance& obj) {
+    if (index < 0 || index > (int)objects.size())
+        objects.push_back(obj);
+    else
+        objects.insert(objects.begin() + index, obj);
 }
