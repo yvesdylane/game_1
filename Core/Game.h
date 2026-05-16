@@ -82,6 +82,23 @@ struct TilesetEditorState {
     }
 };
 
+// New map creation state
+struct NewMapDialog {
+    bool     active      = false;
+    // which field is focused
+    enum class Field { Name, TileSize, Width, Height } focused = Field::Name;
+    std::string inputName     = "";
+    std::string inputTileSize = "64";
+    std::string inputWidth    = "100";
+    std::string inputHeight   = "100";
+};
+
+enum class PanelLayout {
+    TilesOnly,
+    SettingsOnly,
+    Both           // tiles on top, settings on bottom
+};
+
 class Game {
 public:
     bool init();
@@ -126,10 +143,14 @@ private:
     static constexpr int toolbarStartX  = 200; // after menu tabs
     // Total top UI height
     static constexpr int topBarHeight   = MenuBar::HEIGHT; // toolbar lives IN menu bar row
+    // map creation and state
+    NewMapDialog newMapDialog;
+    PanelLayout panelLayout = PanelLayout::TilesOnly;
+    bool        settingsOnTop = false; // in Both mode, swap order
 
-    // For "New Map" / "Save As" name input
-    bool        namingMap    = false;
-    std::string mapNameInput = "";
+    int expandAmount = 5; // default expand/shrink step
+    std::string expandAmountInput = "5";
+    bool expandInputFocused = false;
 
     // Index paths
     static constexpr const char* MAPS_INDEX     = "../Maps/maps.index";
@@ -158,6 +179,11 @@ private:
     LayerState layerStates[5]; // one per layer
     bool       strokeActive = false;
 
+    bool showTilePanel     = true;
+    bool showSettingsPanel = true;  // controlled via panelLayout
+    bool showBottomBar     = true;
+    bool showToolbar       = true;
+
     // ── Methods ───────────────────────────────────────────────────────────────
     void handleEvents();
     void update(float deltaTime);
@@ -167,11 +193,15 @@ private:
     void paintTileAtMouse();
     void eraseTileAtMouse();
 
+    // creating map
+    void centerCameraOnMap();
+    void createNewMap();
+    void renderSettingsPanel(int x, int y, int w, int h);
+
     // panel
     void renderPanel();
     void renderBottomBar();
-
-    // tileset editor
+    void renderTilesPanelContent(int x, int y, int w, int h);
     void renderTilesetEditor();
     void openTilesetEditor(const std::string& imagePath);
     void commitTilesetEditor(); // saves selected tiles into tileLibrary
@@ -191,6 +221,8 @@ private:
     void handleNamingInput(const SDL_Event& e);
     void advancePendingImport();
     void handlePanelClick(int mx, int my);
+    void handleTilesPanelClick(int mx, int my, int px, int contentY, int w, int h);
+    void handleSettingsPanelClick(int mx, int my, int px, int contentY, int w);
 
     void applyUndo(const StrokeCommand& cmd);
     void applyUndo(const PlaceObjectCommand& cmd);

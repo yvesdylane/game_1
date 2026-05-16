@@ -36,7 +36,9 @@ bool Game::init() {
 
     camera = {0, 0, 1.0f};
 
-    if (!map.init(renderer)) { std::cout << "Map init failed\n"; return false; }
+    if (!map.init(DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT, DEFAULT_TILE_SIZE)) {
+        std::cout << "Map init failed\n"; return false;
+    }
     std::cout << "[6] map ok\n" << std::flush;
 
     tileLibrary.load("../Assets/Tilesets/library.tileset");
@@ -57,8 +59,10 @@ bool Game::init() {
 
     // Load active map
     const MapEntry* active = mapManager.getActiveEntry();
-    if (active)
+    if (active) {
         map.load("../Maps/" + active->file);
+        centerCameraOnMap(); //
+    }
 
     // Load tileset index
     tilesetManager.load(TILESETS_INDEX);
@@ -106,7 +110,7 @@ void Game::handleEvents() {
         }
 
         // Naming overlay blocks everything
-        if (namingMap) {
+        if (newMapDialog.active) {
             handleNamingInput(e);
             continue;
         }
@@ -145,8 +149,12 @@ bool Game::handleMenuEvents(const SDL_Event& e) {
 
     switch (result.action) {
         case MenuAction::NewMap:
-            namingMap = true;
-            mapNameInput = "";
+            newMapDialog.active = true;
+            newMapDialog.inputName = "";
+            newMapDialog.inputTileSize = "64";
+            newMapDialog.inputWidth    = "100";
+            newMapDialog.inputHeight   = "100";
+            newMapDialog.focused = NewMapDialog::Field::Name;
             SDL_StartTextInput();
             break;
 
@@ -157,8 +165,12 @@ bool Game::handleMenuEvents(const SDL_Event& e) {
         }
 
         case MenuAction::SaveMapAs:
-            namingMap = true;
-            mapNameInput = "";
+            newMapDialog.active = true;
+            newMapDialog.inputName = "";
+            newMapDialog.inputTileSize = std::to_string(map.getTileSize());
+            newMapDialog.inputWidth    = std::to_string(map.getWidth());
+            newMapDialog.inputHeight   = std::to_string(map.getHeight());
+            newMapDialog.focused = NewMapDialog::Field::Name;
             SDL_StartTextInput();
             break;
 
@@ -168,7 +180,10 @@ bool Game::handleMenuEvents(const SDL_Event& e) {
             mapManager.setActive(result.payload);
             mapManager.save(MAPS_INDEX);
             const MapEntry* next = mapManager.getActiveEntry();
-            if (next) map.load("../Maps/" + next->file);
+            if (next) {
+                map.load("../Maps/" + next->file);
+                centerCameraOnMap(); // ✅ center on switch too
+            }
             break;
         }
 
@@ -354,26 +369,81 @@ void Game::handleTilesetEditorEvents(const SDL_Event& e) {
 }
 
 void Game::handleNamingInput(const SDL_Event& e) {
-    if (e.type == SDL_TEXTINPUT)
-        mapNameInput += e.text.text;
+    auto& d = newMapDialog;
 
-    if (e.type == SDL_KEYDOWN) {
-        if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE && !mapNameInput.empty())
-            mapNameInput.pop_back();
+    if (e.type == SDL_MOUSEBUTTONDOWN) {
+        int mx = e.button.x;
+        int my = e.button.y;
 
-        if (e.key.keysym.scancode == SDL_SCANCODE_RETURN && !mapNameInput.empty()) {
-            std::string file = MapManager::nameToFile(mapNameInput);
-            int idx = mapManager.addMap(mapNameInput, file);
-            mapManager.setActive(idx);
-            mapManager.save(MAPS_INDEX);
-            map = Map();
-            map.init(renderer);
-            namingMap = false;
+        // Field rects (centered dialog box)
+        int bx = screenWidth / 2 - 160;
+        int by = screenHeight / 2 - 110;
+
+        SDL_Rect nameField = {bx + 100, by + 10,  200, 24};
+        SDL_Rect tsField   = {bx + 100, by + 44,  200, 24};
+        SDL_Rect wField    = {bx + 100, by + 78,  200, 24};
+        SDL_Rect hField    = {bx + 100, by + 112, 200, 24};
+        SDL_Rect createBtn = {bx + 10,  by + 150, 120, 30};
+        SDL_Rect cancelBtn = {bx + 140, by + 150, 100, 30};
+
+        auto hit = [&](SDL_Rect r) {
+            return mx >= r.x && mx <= r.x + r.w &&
+                   my >= r.y && my <= r.y + r.h;
+        };
+
+        if (hit(nameField)) { d.focused = NewMapDialog::Field::Name;     SDL_StartTextInput(); }
+        if (hit(tsField))   { d.focused = NewMapDialog::Field::TileSize; SDL_StartTextInput(); }
+        if (hit(wField))    { d.focused = NewMapDialog::Field::Width;    SDL_StartTextInput(); }
+        if (hit(hField))    { d.focused = NewMapDialog::Field::Height;   SDL_StartTextInput(); }
+
+        if (hit(createBtn) && !d.inputName.empty()) {
+            createNewMap();
+        }
+        if (hit(cancelBtn)) {
+            d.active = false;
             SDL_StopTextInput();
         }
+    }
+
+    if (e.type == SDL_TEXTINPUT) {
+        std::string ch(e.text.text);
+        switch (d.focused) {
+            case NewMapDialog::Field::Name:
+                d.inputName += ch; break;
+            case NewMapDialog::Field::TileSize:
+                if (!ch.empty() && std::isdigit(ch[0])) d.inputTileSize += ch; break;
+            case NewMapDialog::Field::Width:
+                if (!ch.empty() && std::isdigit(ch[0])) d.inputWidth += ch; break;
+            case NewMapDialog::Field::Height:
+                if (!ch.empty() && std::isdigit(ch[0])) d.inputHeight += ch; break;
+        }
+    }
+
+    if (e.type == SDL_KEYDOWN) {
+        // Backspace
+        std::string* field = nullptr;
+        switch (d.focused) {
+            case NewMapDialog::Field::Name:     field = &d.inputName;     break;
+            case NewMapDialog::Field::TileSize: field = &d.inputTileSize; break;
+            case NewMapDialog::Field::Width:    field = &d.inputWidth;    break;
+            case NewMapDialog::Field::Height:   field = &d.inputHeight;   break;
+        }
+        if (field && e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE
+            && !field->empty())
+            field->pop_back();
+
+        // Tab cycles fields
+        if (e.key.keysym.scancode == SDL_SCANCODE_TAB) {
+            d.focused = static_cast<NewMapDialog::Field>(
+                (static_cast<int>(d.focused) + 1) % 4);
+        }
+
+        // Enter creates map
+        if (e.key.keysym.scancode == SDL_SCANCODE_RETURN && !d.inputName.empty())
+            createNewMap();
 
         if (e.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
-            namingMap = false;
+            d.active = false;
             SDL_StopTextInput();
         }
     }
@@ -408,7 +478,7 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
         if (e.key.keysym.scancode == SDL_SCANCODE_P) toolMode = ToolMode::Paint;
         if (e.key.keysym.scancode == SDL_SCANCODE_E) toolMode = ToolMode::Eraser;
 
-        // ✅ Undo/redo inside SDL_KEYDOWN where scancode is valid
+        // Undo/redo inside SDL_KEYDOWN where scancode is valid
         if (e.key.keysym.scancode == SDL_SCANCODE_Z && keys[SDL_SCANCODE_LCTRL]) {
             if (keys[SDL_SCANCODE_LSHIFT]) {
                 if (undoSystem.canRedo()) {
@@ -427,6 +497,24 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
                 Command cmd = undoSystem.redo();
                 std::visit([&](auto&& c) { applyRedo(c); }, cmd);
             }
+        }
+
+        // Map expand/shrink shortcuts
+        if (e.key.keysym.scancode == SDL_SCANCODE_RIGHT && keys[SDL_SCANCODE_LCTRL]) {
+            if (keys[SDL_SCANCODE_LSHIFT]) map.shrinkRight(expandAmount);
+            else                           map.expandRight(expandAmount);
+        }
+        if (e.key.keysym.scancode == SDL_SCANCODE_LEFT && keys[SDL_SCANCODE_LCTRL]) {
+            if (keys[SDL_SCANCODE_LSHIFT]) map.shrinkLeft(expandAmount);
+            else                           map.expandLeft(expandAmount);
+        }
+        if (e.key.keysym.scancode == SDL_SCANCODE_UP && keys[SDL_SCANCODE_LCTRL]) {
+            if (keys[SDL_SCANCODE_LSHIFT]) map.shrinkTop(expandAmount);
+            else                           map.expandTop(expandAmount);
+        }
+        if (e.key.keysym.scancode == SDL_SCANCODE_DOWN && keys[SDL_SCANCODE_LCTRL]) {
+            if (keys[SDL_SCANCODE_LSHIFT]) map.shrinkBottom(expandAmount);
+            else                           map.expandBottom(expandAmount);
         }
     }
 
@@ -573,41 +661,75 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
 }
 
 void Game::handlePanelClick(int mx, int my) {
+    const int px       = screenWidth - panelWidth;
+    const int toggleH  = 20;
+    const int toggleY  = menuBarHeight;
+    int       toggleW  = panelWidth / 3;
+
+    // ── Panel layout toggle ───────────────────────────────────────────────────
+    if (my >= toggleY && my < toggleY + toggleH) {
+        int localX = mx - px;
+        int tab    = localX / toggleW;
+        if (tab == 0) panelLayout = PanelLayout::TilesOnly;
+        else if (tab == 1) panelLayout = PanelLayout::SettingsOnly;
+        else panelLayout = PanelLayout::Both;
+        return;
+    }
+
+    // Content area
+    int contentY = menuBarHeight + toggleH;
+    int contentH = screenHeight - contentY - 42;
+
+    // Import buttons
+    if (my >= screenHeight - 40) {
+        int thirdW = (panelWidth - 12) / 3;
+        int localX = mx - px;
+        if (localX < thirdW + 4) {
+            std::string path = openFileDialog();
+            if (!path.empty()) openTilesetEditor(path);
+        }
+        else if (localX < (thirdW + 2) * 2) importMultipleImages();
+        else importFolder();
+        return;
+    }
+
+    // Route to correct panel
+    if (panelLayout == PanelLayout::TilesOnly) {
+        handleTilesPanelClick(mx, my, px, contentY, panelWidth, contentH);
+    }
+    else if (panelLayout == PanelLayout::SettingsOnly) {
+        handleSettingsPanelClick(mx, my, px, contentY, panelWidth);
+    }
+    else { // Both
+        int half = contentH / 2;
+        if (!settingsOnTop) {
+            if (my < contentY + half)
+                handleTilesPanelClick(mx, my, px, contentY, panelWidth, half);
+            else
+                handleSettingsPanelClick(mx, my, px, contentY + half, panelWidth);
+        } else {
+            if (my < contentY + half)
+                handleSettingsPanelClick(mx, my, px, contentY, panelWidth);
+            else
+                handleTilesPanelClick(mx, my, px, contentY + half, panelWidth, half);
+        }
+    }
+}
+
+void Game::handleTilesPanelClick(int mx, int my, int px, int contentY, int w, int h) {
     // Tab bar
-    if (my >= menuBarHeight && my < menuBarHeight + tabBarHeight) {
-        int tabW = panelWidth / 4;
-        int tab  = (mx - (screenWidth - panelWidth)) / tabW;
+    if (my >= contentY && my < contentY + tabBarHeight) {
+        int tabW = w / 4;
+        int tab  = (mx - px) / tabW;
         if (tab >= 0 && tab < 4)
             activeCategory = static_cast<TileCategory>(tab);
         return;
     }
 
-    // Import buttons
-    if (my >= screenHeight - 40) {
-        int thirdW = (panelWidth - 12) / 3;
-        int localX = mx - (screenWidth - panelWidth);
-
-        if (localX < thirdW + 4) {
-            // Single image → always open tileset editor
-            std::string path = openFileDialog();
-            if (!path.empty())
-                openTilesetEditor(path);
-        }
-        else if (localX < (thirdW + 2) * 2) {
-            // Multi select
-            importMultipleImages();
-        }
-        else {
-            // Folder
-            importFolder();
-        }
-        return;
-    }
-
     // Tile selection
-    int localX = mx - (screenWidth - panelWidth);
-    int localY = my - menuBarHeight - tabBarHeight + panelScrollY;
-    int cols   = panelWidth / panelTileSize;
+    int localX = mx - px;
+    int localY = my - (contentY + tabBarHeight) + panelScrollY;
+    int cols   = w / panelTileSize;
     int col    = localX / panelTileSize;
     int row    = localY / panelTileSize;
     auto catTiles = tileLibrary.getByCategory(activeCategory);
@@ -616,8 +738,217 @@ void Game::handlePanelClick(int mx, int my) {
         selectedTile = catTiles[idx].id;
 }
 
-// ── paintTileAtMouse ─────────────────────────────────────────────────────────
+void Game::handleSettingsPanelClick(int mx, int my, int px, int contentY, int w) {
+    // Recalculate button positions matching renderSettingsPanel
+    // Amount field
+    SDL_Rect amtField = {px + 65, contentY + 54, 50, 22};
+    if (mx >= amtField.x && mx <= amtField.x + amtField.w &&
+        my >= amtField.y && my <= amtField.y + amtField.h) {
+        expandInputFocused = true;
+        SDL_StartTextInput();
+        return;
+        }
 
+    expandInputFocused = false;
+
+    // Expand buttons
+    int cy = contentY + 88;
+    int bw = (w - 16) / 2;
+    int bh = 22;
+
+    // + Top
+    if (my >= cy && my < cy + bh) {
+        map.expandTop(expandAmount);
+        centerCameraOnMap(); return;
+    }
+    cy += bh + 2;
+
+    // + Left / + Right
+    if (my >= cy && my < cy + bh) {
+        if (mx < px + w / 2) map.expandLeft(expandAmount);
+        else                  map.expandRight(expandAmount);
+        return;
+    }
+    cy += bh + 2;
+
+    // + Bottom
+    if (my >= cy && my < cy + bh) {
+        map.expandBottom(expandAmount); return;
+    }
+    cy += bh + 8;
+
+    // Shrink section label
+    cy += 16;
+
+    // - Top
+    if (my >= cy && my < cy + bh) {
+        map.shrinkTop(expandAmount); return;
+    }
+    cy += bh + 2;
+
+    // - Left / - Right
+    if (my >= cy && my < cy + bh) {
+        if (mx < px + w / 2) map.shrinkLeft(expandAmount);
+        else                  map.shrinkRight(expandAmount);
+        return;
+    }
+    cy += bh + 2;
+
+    // - Bottom
+    if (my >= cy && my < cy + bh) {
+        map.shrinkBottom(expandAmount); return;
+    }
+    cy += bh + 8;
+
+    // Center camera
+    if (my >= cy && my < cy + bh) {
+        centerCameraOnMap(); return;
+    }
+}
+
+// creating map
+void Game::createNewMap() {
+    auto& d = newMapDialog;
+    try {
+        int ts = std::max(8,  std::stoi(d.inputTileSize));
+        int w  = std::max(1,  std::stoi(d.inputWidth));
+        int h  = std::max(1,  std::stoi(d.inputHeight));
+
+        std::string file = MapManager::nameToFile(d.inputName);
+
+        // Save current map first
+        const MapEntry* cur = mapManager.getActiveEntry();
+        if (cur) map.save("../Maps/" + cur->file);
+
+        // Create and register new map
+        int idx = mapManager.addMap(d.inputName, file);
+        mapManager.setActive(idx);
+        mapManager.save(MAPS_INDEX);
+
+        // Initialize new map
+        map = Map();
+        map.init(w, h, ts);
+        map.save("../Maps/" + file);
+
+        // Center camera on new map
+        centerCameraOnMap();
+
+        undoSystem.clear();
+        d.active = false;
+        SDL_StopTextInput();
+    } catch (...) {
+        std::cout << "createNewMap: invalid input\n";
+    }
+}
+
+void Game::centerCameraOnMap() {
+    camera.zoom = 1.0f;
+    camera.x = map.centerX() - (screenWidth  - panelWidth) / 2.0f;
+    camera.y = map.centerY() - (screenHeight - bottomBarHeight - menuBarHeight) / 2.0f;
+}
+
+void Game::renderSettingsPanel(int x, int y, int w, int h) {
+    // Background already drawn by renderPanel
+
+    int cy = y + 8; // current y cursor
+
+    // ── Map info ──────────────────────────────────────────────────────────────
+    textRenderer.draw(renderer, "── Map ──", x + 6, cy, {140, 140, 160, 255});
+    cy += 18;
+    textRenderer.draw(renderer,
+        "Size: " + std::to_string(map.getWidth()) +
+        " x "   + std::to_string(map.getHeight()) + " tiles",
+        x + 6, cy, {180, 180, 180, 255});
+    cy += 16;
+    textRenderer.draw(renderer,
+        "Tile: " + std::to_string(map.getTileSize()) + "px",
+        x + 6, cy, {180, 180, 180, 255});
+    cy += 24;
+
+    // ── Expand/shrink amount ──────────────────────────────────────────────────
+    textRenderer.draw(renderer, "── Resize ──", x + 6, cy, {140, 140, 160, 255});
+    cy += 18;
+    textRenderer.draw(renderer, "Amount:", x + 6, cy + 4, {160, 160, 160, 255});
+
+    SDL_Rect amtField = {x + 65, cy, 50, 22};
+    SDL_SetRenderDrawColor(renderer,
+        expandInputFocused ? 40 : 25,
+        expandInputFocused ? 40 : 25,
+        expandInputFocused ? 60 : 25, 255);
+    SDL_RenderFillRect(renderer, &amtField);
+    SDL_SetRenderDrawColor(renderer,
+        expandInputFocused ? 100 : 70,
+        expandInputFocused ? 150 : 70,
+        expandInputFocused ? 255 : 70, 255);
+    SDL_RenderDrawRect(renderer, &amtField);
+    textRenderer.draw(renderer,
+        expandAmountInput + (expandInputFocused ? "|" : ""),
+        amtField.x + 4, amtField.y + 4);
+    textRenderer.draw(renderer, "tiles", x + 120, cy + 4, {120, 120, 120, 255});
+    cy += 28;
+
+    // Direction buttons — expand
+    const int bw = (w - 16) / 2;
+    const int bh = 22;
+
+    // Expand buttons
+    textRenderer.draw(renderer, "Expand:", x + 6, cy, {140, 180, 140, 255});
+    cy += 16;
+
+    SDL_Rect eTop    = {x + 6,      cy,      w - 12, bh};
+    SDL_SetRenderDrawColor(renderer, 50, 90, 50, 255);
+    SDL_RenderFillRect(renderer, &eTop);
+    textRenderer.drawCentered(renderer, "+ Top", eTop);
+    cy += bh + 2;
+
+    SDL_Rect eLeft   = {x + 6,      cy, bw, bh};
+    SDL_Rect eRight  = {x + 6 + bw + 2, cy, bw, bh};
+    SDL_SetRenderDrawColor(renderer, 50, 90, 50, 255);
+    SDL_RenderFillRect(renderer, &eLeft);
+    SDL_RenderFillRect(renderer, &eRight);
+    textRenderer.drawCentered(renderer, "+ Left",  eLeft);
+    textRenderer.drawCentered(renderer, "+ Right", eRight);
+    cy += bh + 2;
+
+    SDL_Rect eBot    = {x + 6,      cy, w - 12, bh};
+    SDL_SetRenderDrawColor(renderer, 50, 90, 50, 255);
+    SDL_RenderFillRect(renderer, &eBot);
+    textRenderer.drawCentered(renderer, "+ Bottom", eBot);
+    cy += bh + 8;
+
+    // Shrink buttons
+    textRenderer.draw(renderer, "Shrink:", x + 6, cy, {180, 100, 100, 255});
+    cy += 16;
+
+    SDL_Rect sTop   = {x + 6,         cy,      w - 12, bh};
+    SDL_SetRenderDrawColor(renderer, 90, 40, 40, 255);
+    SDL_RenderFillRect(renderer, &sTop);
+    textRenderer.drawCentered(renderer, "- Top", sTop);
+    cy += bh + 2;
+
+    SDL_Rect sLeft  = {x + 6,         cy, bw, bh};
+    SDL_Rect sRight = {x + 6 + bw + 2, cy, bw, bh};
+    SDL_SetRenderDrawColor(renderer, 90, 40, 40, 255);
+    SDL_RenderFillRect(renderer, &sLeft);
+    SDL_RenderFillRect(renderer, &sRight);
+    textRenderer.drawCentered(renderer, "- Left",  sLeft);
+    textRenderer.drawCentered(renderer, "- Right", sRight);
+    cy += bh + 2;
+
+    SDL_Rect sBot   = {x + 6,         cy, w - 12, bh};
+    SDL_SetRenderDrawColor(renderer, 90, 40, 40, 255);
+    SDL_RenderFillRect(renderer, &sBot);
+    textRenderer.drawCentered(renderer, "- Bottom", sBot);
+    cy += bh + 8;
+
+    // Center camera button
+    SDL_Rect centerBtn = {x + 6, cy, w - 12, bh};
+    SDL_SetRenderDrawColor(renderer, 60, 80, 120, 255);
+    SDL_RenderFillRect(renderer, &centerBtn);
+    textRenderer.drawCentered(renderer, "Center Camera", centerBtn);
+}
+
+// ── paintTileAtMouse ─────────────────────────────────────────────────────────
 void Game::paintTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
@@ -640,8 +971,8 @@ void Game::paintTileAtMouse() {
         float snapX = worldX;
         float snapY = worldY;
         if (placementMode == PlacementMode::Grid) {
-            snapX = static_cast<int>(worldX / TILE_SIZE) * TILE_SIZE;
-            snapY = static_cast<int>(worldY / TILE_SIZE) * TILE_SIZE;
+            snapX = static_cast<int>(worldX / map.getTileSize()) * map.getTileSize();
+            snapY = static_cast<int>(worldY / map.getTileSize()) * map.getTileSize();
         }
         ObjectInstance obj;
         obj.tileID = selectedTile;
@@ -651,8 +982,8 @@ void Game::paintTileAtMouse() {
         int idx = map.addObject(obj);
         undoSystem.recordPlaceObject(idx, obj); // ✅
     } else {
-        int tileX = static_cast<int>(worldX / TILE_SIZE);
-        int tileY = static_cast<int>(worldY / TILE_SIZE);
+        int tileX = static_cast<int>(worldX / map.getTileSize());
+        int tileY = static_cast<int>(worldY / map.getTileSize());
         int oldID = map.getTile(selectedLayer, tileX, tileY);
         undoSystem.recordTile(selectedLayer, tileX, tileY, oldID, selectedTile); // ✅
         map.setTile(selectedLayer, tileX, tileY, selectedTile);
@@ -688,8 +1019,8 @@ void Game::eraseTileAtMouse() {
             }
     }
 
-    int tileX = static_cast<int>(worldX / TILE_SIZE);
-    int tileY = static_cast<int>(worldY / TILE_SIZE);
+    int tileX = static_cast<int>(worldX / map.getTileSize());
+    int tileY = static_cast<int>(worldY / map.getTileSize());
     int oldID = map.getTile(selectedLayer, tileX, tileY);
     if (oldID != Map::TILE_EMPTY) {
         undoSystem.recordTile(selectedLayer, tileX, tileY, oldID, Map::TILE_EMPTY); // ✅
@@ -724,8 +1055,8 @@ void Game::render() {
                 ghostX = worldX;
                 ghostY = worldY;
             } else {
-                ghostX = static_cast<int>(worldX / TILE_SIZE) * TILE_SIZE;
-                ghostY = static_cast<int>(worldY / TILE_SIZE) * TILE_SIZE;
+                ghostX = static_cast<int>(worldX / map.getTileSize()) * map.getTileSize();
+                ghostY = static_cast<int>(worldY / map.getTileSize()) * map.getTileSize();
             }
             int drawX = static_cast<int>((ghostX - camera.x) * camera.zoom);
             int drawY = static_cast<int>((ghostY - camera.y) * camera.zoom);
@@ -744,25 +1075,80 @@ void Game::render() {
     menuBar.render(renderer, textRenderer, mapManager, tilesetManager, screenWidth);
     toolbar.render(renderer, textRenderer, toolMode, toolbarStartX, screenWidth);
 
-    // Naming overlay on top of absolutely everything
-    if (namingMap) {
+    // Map craetion  overlay on top of absolutely everything
+    if (newMapDialog.active) {
+        auto& d = newMapDialog;
+        int bx = screenWidth / 2 - 160;
+        int by = screenHeight / 2 - 110;
+
+        // Dark overlay
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160);
         SDL_Rect overlay = {0, 0, screenWidth, screenHeight};
         SDL_RenderFillRect(renderer, &overlay);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
-        SDL_Rect box = {screenWidth/2 - 150, screenHeight/2 - 30, 300, 60};
-        SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+        // Dialog box
+        SDL_Rect box = {bx, by, 320, 200};
+        SDL_SetRenderDrawColor(renderer, 50, 50, 55, 255);
         SDL_RenderFillRect(renderer, &box);
-        SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+        SDL_SetRenderDrawColor(renderer, 100, 100, 110, 255);
         SDL_RenderDrawRect(renderer, &box);
 
-        textRenderer.draw(renderer, "Map name:",
-            box.x + 10, box.y + 8, {160, 160, 160, 255});
-        textRenderer.draw(renderer, mapNameInput + "|",
-            box.x + 10, box.y + 28);
-    }
+        // Title
+        textRenderer.draw(renderer, "New Map",
+            bx + 10, by + 10, {220, 220, 220, 255});
+
+        // Fields
+        struct FieldDef {
+            const char* label;
+            std::string* value;
+            NewMapDialog::Field field;
+            int y;
+            const char* hint;
+        } fields[] = {
+            {"Name:",      &d.inputName,     NewMapDialog::Field::Name,     by + 34,  ""},
+            {"Tile size:", &d.inputTileSize, NewMapDialog::Field::TileSize, by + 68,  "px (fixed after creation)"},
+            {"Width:",     &d.inputWidth,    NewMapDialog::Field::Width,    by + 102, "tiles"},
+            {"Height:",    &d.inputHeight,   NewMapDialog::Field::Height,   by + 136, "tiles"},
+        };
+
+        for (auto& f : fields) {
+            textRenderer.draw(renderer, f.label, bx + 10, f.y + 5,
+                {160, 160, 160, 255});
+
+            SDL_Rect fr = {bx + 100, f.y, 200, 24};
+            bool focused = d.focused == f.field;
+            SDL_SetRenderDrawColor(renderer,
+                focused ? 40 : 25, focused ? 40 : 25, focused ? 60 : 25, 255);
+            SDL_RenderFillRect(renderer, &fr);
+            SDL_SetRenderDrawColor(renderer,
+                focused ? 100 : 70, focused ? 150 : 70, focused ? 255 : 70, 255);
+            SDL_RenderDrawRect(renderer, &fr);
+
+            std::string display = *f.value + (focused ? "|" : "");
+            textRenderer.draw(renderer, display, fr.x + 4, fr.y + 5);
+
+            if (!std::string(f.hint).empty())
+                textRenderer.draw(renderer, f.hint,
+                    fr.x + fr.w + 6, fr.y + 5, {100, 100, 100, 255});
+        }
+
+        // Buttons
+        SDL_Rect createBtn = {bx + 10,  by + 162, 120, 28};
+        SDL_Rect cancelBtn = {bx + 140, by + 162, 100, 28};
+
+        bool canCreate = !d.inputName.empty();
+        SDL_SetRenderDrawColor(renderer, canCreate ? 60 : 30,
+                                         canCreate ? 120 : 50,
+                                         canCreate ? 60  : 30, 255);
+        SDL_RenderFillRect(renderer, &createBtn);
+        textRenderer.drawCentered(renderer, "Create", createBtn);
+
+        SDL_SetRenderDrawColor(renderer, 120, 50, 50, 255);
+        SDL_RenderFillRect(renderer, &cancelBtn);
+        textRenderer.drawCentered(renderer, "Cancel", cancelBtn);
+}
 
     SDL_RenderPresent(renderer);
 }
@@ -772,91 +1158,52 @@ void Game::render() {
 void Game::renderPanel() {
     const int px = screenWidth - panelWidth;
 
+    // Background
     SDL_Rect bg = {px, menuBarHeight, panelWidth, screenHeight - menuBarHeight};
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &bg);
 
-    // Tab bar
-    const char* tabNames[] = {"Terrain", "Object", "Deco", "Resource"};
-    int tabW = panelWidth / 4;
-    for (int i = 0; i < 4; i++) {
-        SDL_Rect tab = {px + i * tabW, menuBarHeight, tabW, tabBarHeight};
-        if (static_cast<TileCategory>(i) == activeCategory)
-            SDL_SetRenderDrawColor(renderer, 80, 130, 200, 255);
-        else
-            SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
-        SDL_RenderFillRect(renderer, &tab);
-        SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
-        SDL_RenderDrawRect(renderer, &tab);
-        textRenderer.drawCentered(renderer, tabNames[i], tab);
-    }
+    // ── Panel layout toggle bar ───────────────────────────────────────────────
+    const int toggleH = 20;
+    const int toggleY = menuBarHeight;
+    int toggleW = panelWidth / 3;
 
-    // ✅ Clip rect — tiles cannot draw above tab bar or below import buttons
-    SDL_Rect clipRect = {
-        px,
-        menuBarHeight + tabBarHeight,
-        panelWidth,
-        screenHeight - menuBarHeight - tabBarHeight - 42
+    struct { const char* label; PanelLayout mode; } toggles[] = {
+        {"Tiles",    PanelLayout::TilesOnly},
+        {"Settings", PanelLayout::SettingsOnly},
+        {"Both",     PanelLayout::Both},
     };
-    SDL_RenderSetClipRect(renderer, &clipRect);
-
-    // Tiles
-    auto catTiles = tileLibrary.getByCategory(activeCategory);
-    int  cols     = panelWidth / panelTileSize;
-    int  startY   = menuBarHeight + tabBarHeight - panelScrollY;
-
-    for (int i = 0; i < (int)catTiles.size(); i++) {
-        int col   = i % cols;
-        int row   = i / cols;
-        int drawX = px + col * panelTileSize;
-        int drawY = startY + row * panelTileSize;
-
-        tileRenderer.renderTile(renderer, catTiles[i], drawX, drawY,
-                                (float)panelTileSize / catTiles[i].srcW);
-
-        if (catTiles[i].id == selectedTile) {
-            SDL_Rect hl = {drawX, drawY, panelTileSize, panelTileSize};
-            SDL_SetRenderDrawColor(renderer, 255, 220, 0, 255);
-            SDL_RenderDrawRect(renderer, &hl);
-        }
+    for (int i = 0; i < 3; i++) {
+        SDL_Rect t = {px + i * toggleW, toggleY, toggleW, toggleH};
+        SDL_SetRenderDrawColor(renderer,
+            panelLayout == toggles[i].mode ? 70 : 45,
+            panelLayout == toggles[i].mode ? 70 : 45,
+            panelLayout == toggles[i].mode ? 90 : 45, 255);
+        SDL_RenderFillRect(renderer, &t);
+        SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+        SDL_RenderDrawRect(renderer, &t);
+        textRenderer.drawCentered(renderer, toggles[i].label, t,
+            {180, 180, 180, 255});
     }
 
-    // Hover
-    hoveredTile = -1;
-    int hx, hy;
-    SDL_GetMouseState(&hx, &hy);
-    if (hx >= px && hx < screenWidth &&
-        hy > menuBarHeight + tabBarHeight && hy < screenHeight - 40) {
-        int localX = hx - px;
-        int localY = hy - (menuBarHeight + tabBarHeight) + panelScrollY;
-        int col    = localX / panelTileSize;
-        int row    = localY / panelTileSize;
-        int idx    = row * (panelWidth / panelTileSize) + col;
-        if (idx >= 0 && idx < (int)catTiles.size()) {
-            hoveredTile = catTiles[idx].id;
-            int drawX = px + (idx % (panelWidth / panelTileSize)) * panelTileSize;
-            int drawY = menuBarHeight + tabBarHeight - panelScrollY
-                      + (idx / (panelWidth / panelTileSize)) * panelTileSize;
-            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
-            SDL_Rect hoverRect = {drawX, drawY, panelTileSize, panelTileSize};
-            SDL_RenderFillRect(renderer, &hoverRect);
-            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-        }
+    // Content area starts below toggle bar
+    int contentY    = menuBarHeight + toggleH;
+    int contentH    = screenHeight - contentY - 42; // leave room for import buttons
+
+    if (panelLayout == PanelLayout::TilesOnly) {
+        renderTilesPanelContent(px, contentY, panelWidth, contentH);
     }
-
-    // ✅ Remove clip rect before drawing fixed UI elements
-    SDL_RenderSetClipRect(renderer, nullptr);
-
-    // Tile name hover display
-    if (hoveredTile >= 0) {
-        const TileDefinition* def = tileLibrary.getById(hoveredTile);
-        if (def && !def->label.empty()) {
-            SDL_Rect nameBg = {px, screenHeight - 60, panelWidth, 20};
-            SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
-            SDL_RenderFillRect(renderer, &nameBg);
-            textRenderer.drawCentered(renderer, def->label, nameBg,
-                                      {200, 200, 200, 255});
+    else if (panelLayout == PanelLayout::SettingsOnly) {
+        renderSettingsPanel(px, contentY, panelWidth, contentH);
+    }
+    else { // Both
+        int half = contentH / 2;
+        if (!settingsOnTop) {
+            renderTilesPanelContent(px, contentY,        panelWidth, half);
+            renderSettingsPanel    (px, contentY + half, panelWidth, half);
+        } else {
+            renderSettingsPanel    (px, contentY,        panelWidth, half);
+            renderTilesPanelContent(px, contentY + half, panelWidth, half);
         }
     }
 
@@ -880,6 +1227,87 @@ void Game::renderPanel() {
     SDL_SetRenderDrawColor(renderer, 80, 60, 120, 255);
     SDL_RenderFillRect(renderer, &btn3);
     textRenderer.drawCentered(renderer, "Folder", btn3);
+}
+
+void Game::renderTilesPanelContent(int x, int y, int w, int h) {
+    const int px = x;
+
+    // Tab bar at top of this content area
+    const char* tabNames[] = {"Terrain", "Object", "Deco", "Resource"};
+    int tabW = w / 4;
+    for (int i = 0; i < 4; i++) {
+        SDL_Rect tab = {px + i * tabW, y, tabW, tabBarHeight};
+        if (static_cast<TileCategory>(i) == activeCategory)
+            SDL_SetRenderDrawColor(renderer, 80, 130, 200, 255);
+        else
+            SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
+        SDL_RenderFillRect(renderer, &tab);
+        SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
+        SDL_RenderDrawRect(renderer, &tab);
+        textRenderer.drawCentered(renderer, tabNames[i], tab);
+    }
+
+    // Clip to tile area — below tab bar, above bottom of this content block
+    SDL_Rect clipRect = {px, y + tabBarHeight, w, h - tabBarHeight};
+    SDL_RenderSetClipRect(renderer, &clipRect);
+
+    auto catTiles = tileLibrary.getByCategory(activeCategory);
+    int  cols     = w / panelTileSize;
+    int  startY   = y + tabBarHeight - panelScrollY;
+
+    for (int i = 0; i < (int)catTiles.size(); i++) {
+        int col   = i % cols;
+        int row   = i / cols;
+        int drawX = px + col * panelTileSize;
+        int drawY = startY + row * panelTileSize;
+
+        tileRenderer.renderTile(renderer, catTiles[i], drawX, drawY,
+                                (float)panelTileSize / catTiles[i].srcW);
+
+        if (catTiles[i].id == selectedTile) {
+            SDL_Rect hl = {drawX, drawY, panelTileSize, panelTileSize};
+            SDL_SetRenderDrawColor(renderer, 255, 220, 0, 255);
+            SDL_RenderDrawRect(renderer, &hl);
+        }
+    }
+
+    // Hover detection
+    hoveredTile = -1;
+    int hx, hy;
+    SDL_GetMouseState(&hx, &hy);
+    if (hx >= px && hx < px + w &&
+        hy > y + tabBarHeight && hy < y + h) {
+        int localX = hx - px;
+        int localY = hy - (y + tabBarHeight) + panelScrollY;
+        int col    = localX / panelTileSize;
+        int row    = localY / panelTileSize;
+        int idx    = row * (w / panelTileSize) + col;
+        if (idx >= 0 && idx < (int)catTiles.size()) {
+            hoveredTile = catTiles[idx].id;
+            int drawX = px + (idx % (w / panelTileSize)) * panelTileSize;
+            int drawY = y + tabBarHeight - panelScrollY
+                      + (idx / (w / panelTileSize)) * panelTileSize;
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30);
+            SDL_Rect hoverRect = {drawX, drawY, panelTileSize, panelTileSize};
+            SDL_RenderFillRect(renderer, &hoverRect);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        }
+    }
+
+    SDL_RenderSetClipRect(renderer, nullptr);
+
+    // Hover name
+    if (hoveredTile >= 0) {
+        const TileDefinition* def = tileLibrary.getById(hoveredTile);
+        if (def && !def->label.empty()) {
+            SDL_Rect nameBg = {px, y + h - 20, w, 20};
+            SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+            SDL_RenderFillRect(renderer, &nameBg);
+            textRenderer.drawCentered(renderer, def->label, nameBg,
+                                      {200, 200, 200, 255});
+        }
+    }
 }
 
 // ── renderBottomBar ──────────────────────────────────────────────────────────
@@ -947,8 +1375,8 @@ void Game::renderBottomBar() {
     SDL_GetMouseState(&mx, &my);
     float worldX = camera.x + mx / camera.zoom;
     float worldY = camera.y + my / camera.zoom;
-    int   tileX  = static_cast<int>(worldX / TILE_SIZE);
-    int   tileY  = static_cast<int>(worldY / TILE_SIZE);
+    int tileX = static_cast<int>(worldX / map.getTileSize());
+    int tileY = static_cast<int>(worldY / map.getTileSize());
 
     textRenderer.draw(renderer,
         "px " + std::to_string((int)worldX) + ", " + std::to_string((int)worldY),
@@ -993,8 +1421,8 @@ void Game::commitTilesetEditor() {
             def.srcY      = 0;
             def.srcW      = tsEditor.imageW;
             def.srcH      = tsEditor.imageH;
-            def.tileW     = std::max(1, tsEditor.imageW / TILE_SIZE);
-            def.tileH     = std::max(1, tsEditor.imageH / TILE_SIZE);
+            def.tileW = std::max(1, def.srcW / map.getTileSize());
+            def.tileH = std::max(1, def.srcH / map.getTileSize());
             def.category  = tsEditor.category;
             def.label     = "";
             tileLibrary.addTile(def);
@@ -1011,8 +1439,8 @@ void Game::commitTilesetEditor() {
             def.srcY      = row * tsEditor.tileH;
             def.srcW      = tsEditor.tileW;
             def.srcH      = tsEditor.tileH;
-            def.tileW     = std::max(1, tsEditor.tileW / TILE_SIZE);
-            def.tileH     = std::max(1, tsEditor.tileH / TILE_SIZE);
+            def.tileW     = std::max(1, def.srcW / map.getTileSize());
+            def.tileH     = std::max(1, def.srcH / map.getTileSize());
             def.category  = tsEditor.category;
             def.label     = "";
             tileLibrary.addTile(def);
@@ -1169,8 +1597,8 @@ void Game::importSingleImage(const std::string& path) {
         def.srcY      = 0;
         def.srcW      = w;
         def.srcH      = h;
-        def.tileW     = std::max(1, w / TILE_SIZE);
-        def.tileH     = std::max(1, h / TILE_SIZE);
+        def.tileW = std::max(1, def.srcW / map.getTileSize());
+        def.tileH = std::max(1, def.srcH / map.getTileSize());
         def.category  = tsEditor.category;
         def.label     = FileUtils::stemName(path);
         tileLibrary.addTile(def);
@@ -1189,8 +1617,8 @@ void Game::importSingleImage(const std::string& path) {
                 def.srcY      = row * th;
                 def.srcW      = tw;
                 def.srcH      = th;
-                def.tileW     = std::max(1, tw / TILE_SIZE);
-                def.tileH     = std::max(1, th / TILE_SIZE);
+                def.tileW = std::max(1, def.srcW / map.getTileSize());
+                def.tileH = std::max(1, def.srcH / map.getTileSize());
                 def.category  = tsEditor.category;
                 def.label     = FileUtils::stemName(path);
                 tileLibrary.addTile(def);

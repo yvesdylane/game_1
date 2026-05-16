@@ -24,7 +24,13 @@ enum class MenuAction {
 	RemoveTileset,   // payload: tileset index
 	SwitchTileset,   // payload: tileset index (for highlight only)
 	RenameMap,       // payload: map index
-	CloseMenu
+	CloseMenu,
+	ToggleTilePanel,
+	ToggleSettingsPanel,
+	ToggleBottomBar,
+	ToggleGrid,
+	ToggleToolbar,
+	CenterCamera
 };
 
 struct MenuResult {

@@ -1,10 +1,3 @@
-//
-// Created by yves-dylane on 5/2/26.
-//
-
-#ifndef GAME1_MAP_H
-#define GAME1_MAP_H
-
 #pragma once
 #include <SDL2/SDL.h>
 #include <string>
@@ -15,40 +8,72 @@
 #include "../World/ObjectInstance.h"
 #include "../Editor/LayerState.h"
 
-constexpr int MAP_WIDTH  = 100;
-constexpr int MAP_HEIGHT = 100;
-constexpr int TILE_SIZE  = 64;
+// Default values for new maps
+constexpr int DEFAULT_MAP_WIDTH  = 100;
+constexpr int DEFAULT_MAP_HEIGHT = 100;
+constexpr int DEFAULT_TILE_SIZE  = 64;
 
 class Map {
 public:
-	static constexpr int LAYER_COUNT = 5;
-	static constexpr int TILE_EMPTY  = -1;
+    static constexpr int LAYER_COUNT = 5;
+    static constexpr int TILE_EMPTY  = -1;
 
-	Map();
-	bool init(SDL_Renderer* renderer);
+    Map();
 
-	// Tile grid
-	void setTile(int layer, int x, int y, int tileID);
-	void clearTile(int layer, int x, int y);
-	int  getTile(int layer, int x, int y) const;
+    // Initialize with specific dimensions
+    bool init(int width, int height, int tileSize);
 
-	// Objects
-	int  addObject(const ObjectInstance& obj);    // returns index
-	void removeObject(int index);
-	const std::vector<ObjectInstance>& getObjects() const { return objects; }
+    // Tile grid access
+    void setTile(int layer, int x, int y, int tileID);
+    void clearTile(int layer, int x, int y);
+    int  getTile(int layer, int x, int y) const;
 
-	// Render
-	void render(SDL_Renderer* renderer, const Camera& camera, TileLibrary& library, TileRenderer& tileRenderer,
-				 int selectedObjectIndex = -1, bool showGrid = true, const LayerState* layerStates = nullptr);
+    // Expand — adds tiles filled with TILE_EMPTY
+    void expandRight (int amount = 5);
+    void expandLeft  (int amount = 5);
+    void expandTop   (int amount = 5);
+    void expandBottom(int amount = 5);
 
-	// Save / load
-	bool save(const std::string& path) const;
-	bool load(const std::string& path);
-	void insertObject(int index, const ObjectInstance& obj);
+    // Shrink — removes tiles from edge (lost tiles gone)
+    void shrinkRight (int amount = 5);
+    void shrinkLeft  (int amount = 5);
+    void shrinkTop   (int amount = 5);
+    void shrinkBottom(int amount = 5);
+
+    // Dimensions
+    int getWidth()    const { return mapWidth; }
+    int getHeight()   const { return mapHeight; }
+    int getTileSize() const { return tileSize; }
+
+    // Camera helper — world center of map
+    float centerX() const { return (mapWidth  * tileSize) / 2.0f; }
+    float centerY() const { return (mapHeight * tileSize) / 2.0f; }
+
+    // Objects
+    int  addObject(const ObjectInstance& obj);
+    void removeObject(int index);
+    void insertObject(int index, const ObjectInstance& obj);
+    const std::vector<ObjectInstance>& getObjects() const { return objects; }
+
+    // Render
+    void render(SDL_Renderer* renderer, const Camera& camera,
+                TileLibrary& library, TileRenderer& tileRenderer,
+                int selectedObjectIndex = -1,
+                bool showGrid = true,
+                const LayerState* layerStates = nullptr);
+
+    // Save / load
+    bool save(const std::string& path) const;
+    bool load(const std::string& path);
 
 private:
-	int tiles[LAYER_COUNT][MAP_HEIGHT][MAP_WIDTH];
-	std::vector<ObjectInstance> objects;
-};
+    // Dynamic tile storage [layer][y][x]
+    std::vector<std::vector<std::vector<int>>> tiles;
+    std::vector<ObjectInstance> objects;
 
-#endif //GAME1_MAP_H
+    int mapWidth  = DEFAULT_MAP_WIDTH;
+    int mapHeight = DEFAULT_MAP_HEIGHT;
+    int tileSize  = DEFAULT_TILE_SIZE;
+
+    void resizeTiles(); // rebuilds tiles vector to match mapWidth/mapHeight
+};
