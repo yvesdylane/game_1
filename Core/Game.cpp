@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstdio>
 #include <filesystem>
+#include <cstdlib>
 #include "tinyfiledialogs.h"
 #include "../Editor/FileUtils.h"
 
@@ -63,6 +64,21 @@ bool Game::init() {
     if (active) {
         map.load("../Maps/" + active->file);
         centerCameraOnMap(); //
+    }
+
+    // Load object definitions
+    objectLibrary.load(OBJECTS_INDEX);
+    if (objectLibrary.all().empty()) {
+        selectedObjectDefinition = objectLibrary.add(ObjectDefinitionType::MapObject);
+        ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition);
+        if (def) {
+            if (const MapEntry* active = mapManager.getActiveEntry())
+                def->mapPath = std::string("../Maps/") + active->file;
+            ObjectDefinitionLibrary::generateClassFiles(*def, GAMEOBJECTS_DIR);
+        }
+        objectLibrary.save(OBJECTS_INDEX);
+    } else {
+        selectedObjectDefinition = 0;
     }
 
     // Load tileset index
@@ -576,8 +592,14 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
         int my = e.button.y;
         bool consumed = false;
 
+        // Left object library panel
+        if (mx < objectPanelWidth && my >= menuBarHeight) {
+            consumed = true;
+            handleObjectPanelClick(mx, my);
+        }
+
         // Right panel
-        if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) {
+        if (!consumed && (showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) {
             consumed = true;
             handlePanelClick(mx, my);
         }
@@ -712,13 +734,70 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
     }
 }
 
+void Game::handleObjectPanelClick(int mx, int my) {
+    if (my < menuBarHeight) return;
+
+    const int x = 0;
+    const int y = menuBarHeight;
+    const int rowH = 28;
+    const int listY = y + 34;
+    const int listH = screenHeight - menuBarHeight - bottomBarHeight - 86;
+
+    if (my >= listY && my < listY + listH) {
+        int idx = (my - listY) / rowH;
+        if (idx >= 0 && idx < (int)objectLibrary.all().size())
+            selectedObjectDefinition = idx;
+        return;
+    }
+
+    const int btnY = screenHeight - bottomBarHeight - 46;
+    const int btnH = 24;
+    const int btnW = (objectPanelWidth - 16) / 3;
+    SDL_Rect mapBtn  = {x + 4, btnY, btnW, btnH};
+    SDL_Rect charBtn = {x + 6 + btnW, btnY, btnW, btnH};
+    SDL_Rect gameBtn = {x + 8 + btnW * 2, btnY, btnW, btnH};
+
+    auto hit = [&](const SDL_Rect& r) {
+        return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
+    };
+
+    SDL_Rect openCodeBtn = {x + 4, screenHeight - bottomBarHeight - 20, objectPanelWidth - 8, 16};
+    if (hit(openCodeBtn)) {
+        if (const ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition)) {
+            std::string file = std::string(GAMEOBJECTS_DIR) + "/" + def->className + ".cpp";
+            std::string command = "xdg-open \"" + file + "\" >/dev/null 2>&1 &";
+            std::system(command.c_str());
+        }
+        return;
+    }
+
+    ObjectDefinitionType type;
+    bool create = true;
+    if (hit(mapBtn)) type = ObjectDefinitionType::MapObject;
+    else if (hit(charBtn)) type = ObjectDefinitionType::CharacterObject;
+    else if (hit(gameBtn)) type = ObjectDefinitionType::GameObject;
+    else create = false;
+
+    if (create) {
+        selectedObjectDefinition = objectLibrary.add(type);
+        if (ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition)) {
+            if (type == ObjectDefinitionType::MapObject) {
+                if (const MapEntry* active = mapManager.getActiveEntry())
+                    def->mapPath = std::string("../Maps/") + active->file;
+            }
+            ObjectDefinitionLibrary::generateClassFiles(*def, GAMEOBJECTS_DIR);
+        }
+        objectLibrary.save(OBJECTS_INDEX);
+    }
+}
+
 void Game::handlePanelClick(int mx, int my) {
     if (!showTilePanel && !showSettingsPanel) return;
 
     const int px       = screenWidth - panelWidth;
     const int toggleH  = 20;
     const int toggleY  = menuBarHeight;
-    int       toggleW  = panelWidth / 3;
+    int       toggleW  = panelWidth / 4;
 
     // ── Panel layout toggle ───────────────────────────────────────────────────
     if (my >= toggleY && my < toggleY + toggleH) {
@@ -726,6 +805,7 @@ void Game::handlePanelClick(int mx, int my) {
         int tab    = localX / toggleW;
         if (tab == 0) panelLayout = PanelLayout::TilesOnly;
         else if (tab == 1) panelLayout = PanelLayout::SettingsOnly;
+        else if (tab == 2) panelLayout = PanelLayout::ObjectsOnly;
         else panelLayout = PanelLayout::Both;
         return;
     }
@@ -759,6 +839,9 @@ void Game::handlePanelClick(int mx, int my) {
     }
     else if (panelLayout == PanelLayout::SettingsOnly) {
         handleSettingsPanelClick(mx, my, px, contentY, panelWidth);
+    }
+    else if (panelLayout == PanelLayout::ObjectsOnly) {
+        handleObjectPropertiesPanelClick(mx, my, px, contentY, panelWidth);
     }
     else { // Both
         int half = contentH / 2;
@@ -796,6 +879,179 @@ void Game::handleTilesPanelClick(int mx, int my, int px, int contentY, int w, in
     int  idx      = row * cols + col;
     if (idx >= 0 && idx < (int)catTiles.size())
         selectedTile = catTiles[idx].id;
+}
+
+
+static const char* collisionOriginName(CollisionOrigin origin) {
+    switch (origin) {
+        case CollisionOrigin::TopLeft: return "TopLeft";
+        case CollisionOrigin::Center:  return "Center";
+        case CollisionOrigin::Bottom:  return "Bottom";
+        case CollisionOrigin::Top:     return "Top";
+        case CollisionOrigin::Left:    return "Left";
+        case CollisionOrigin::Right:   return "Right";
+    }
+    return "TopLeft";
+}
+
+static void applyCollisionOrigin(ObjectInstance& obj, const TileDefinition* def) {
+    float spriteW = def ? (float)def->srcW : obj.collisionW;
+    float spriteH = def ? (float)def->srcH : obj.collisionH;
+    switch (obj.collisionOrigin) {
+        case CollisionOrigin::TopLeft:
+            obj.collisionOffsetX = 0.0f;
+            obj.collisionOffsetY = 0.0f;
+            break;
+        case CollisionOrigin::Center:
+            obj.collisionOffsetX = (spriteW - obj.collisionW) * 0.5f;
+            obj.collisionOffsetY = (spriteH - obj.collisionH) * 0.5f;
+            break;
+        case CollisionOrigin::Bottom:
+            obj.collisionOffsetX = (spriteW - obj.collisionW) * 0.5f;
+            obj.collisionOffsetY = spriteH - obj.collisionH;
+            break;
+        case CollisionOrigin::Top:
+            obj.collisionOffsetX = (spriteW - obj.collisionW) * 0.5f;
+            obj.collisionOffsetY = 0.0f;
+            break;
+        case CollisionOrigin::Left:
+            obj.collisionOffsetX = 0.0f;
+            obj.collisionOffsetY = (spriteH - obj.collisionH) * 0.5f;
+            break;
+        case CollisionOrigin::Right:
+            obj.collisionOffsetX = spriteW - obj.collisionW;
+            obj.collisionOffsetY = (spriteH - obj.collisionH) * 0.5f;
+            break;
+    }
+}
+
+void Game::handleObjectPropertiesPanelClick(int mx, int my, int px, int contentY, int w) {
+    ObjectInstance* obj = map.getObject(selectedObject);
+    if (!obj) return;
+
+    auto hit = [&](const SDL_Rect& r) {
+        return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
+    };
+
+    const int pad = 6;
+    const int gap = 2;
+    const int bh = 22;
+    int cy = contentY + 8 + 18 + 16 + 16 + 16 + 16 + 16;
+
+    const int thirdW = (w - pad * 2 - gap * 2) / 3;
+    SDL_Rect noneBtn = {px + pad, cy, thirdW, bh};
+    SDL_Rect boxBtn = {px + pad + thirdW + gap, cy, thirdW, bh};
+    SDL_Rect circleBtn = {px + pad + (thirdW + gap) * 2, cy, thirdW, bh};
+    if (hit(noneBtn)) { obj->collisionShape = CollisionShape::None; return; }
+    if (hit(boxBtn)) { obj->collisionShape = CollisionShape::Box; return; }
+    if (hit(circleBtn)) { obj->collisionShape = CollisionShape::Circle; return; }
+    cy += bh + 8;
+
+    const int originW = (w - pad * 2 - gap) / 2;
+    CollisionOrigin origins[] = {
+        CollisionOrigin::TopLeft, CollisionOrigin::Center,
+        CollisionOrigin::Bottom, CollisionOrigin::Top,
+        CollisionOrigin::Left, CollisionOrigin::Right
+    };
+    for (int i = 0; i < 6; i++) {
+        SDL_Rect r = {px + pad + (i % 2) * (originW + gap), cy + (i / 2) * (bh + gap), originW, bh};
+        if (hit(r)) {
+            obj->collisionOrigin = origins[i];
+            applyCollisionOrigin(*obj, tileLibrary.getById(obj->tileID));
+            return;
+        }
+    }
+    cy += 3 * (bh + gap) + 6;
+
+    const int halfW = (w - pad * 2 - gap) / 2;
+    SDL_Rect wMinus = {px + pad, cy, halfW, bh};
+    SDL_Rect wPlus = {px + pad + halfW + gap, cy, halfW, bh};
+    cy += bh + gap;
+    SDL_Rect hMinus = {px + pad, cy, halfW, bh};
+    SDL_Rect hPlus = {px + pad + halfW + gap, cy, halfW, bh};
+    cy += bh + gap;
+    SDL_Rect rMinus = {px + pad, cy, halfW, bh};
+    SDL_Rect rPlus = {px + pad + halfW + gap, cy, halfW, bh};
+
+    if (hit(wMinus)) obj->collisionW = std::max(1.0f, obj->collisionW - 4.0f);
+    else if (hit(wPlus)) obj->collisionW += 4.0f;
+    else if (hit(hMinus)) obj->collisionH = std::max(1.0f, obj->collisionH - 4.0f);
+    else if (hit(hPlus)) obj->collisionH += 4.0f;
+    else if (hit(rMinus)) obj->collisionRadius = std::max(1.0f, obj->collisionRadius - 4.0f);
+    else if (hit(rPlus)) obj->collisionRadius += 4.0f;
+    else return;
+
+    applyCollisionOrigin(*obj, tileLibrary.getById(obj->tileID));
+}
+
+void Game::renderObjectPropertiesPanel(int x, int y, int w, int h) {
+    auto drawButton = [&](const SDL_Rect& r, const std::string& label) {
+        int mx, my;
+        SDL_GetMouseState(&mx, &my);
+        bool hover = mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
+        SDL_SetRenderDrawColor(renderer, hover ? 92 : 64, hover ? 92 : 64, hover ? 92 : 64, 255);
+        SDL_RenderFillRect(renderer, &r);
+        SDL_SetRenderDrawColor(renderer, hover ? 230 : 125, hover ? 230 : 125, hover ? 230 : 125, 255);
+        SDL_RenderDrawRect(renderer, &r);
+        textRenderer.drawCentered(renderer, label, r, {245, 245, 245, 255});
+    };
+
+    const int pad = 6;
+    const int gap = 2;
+    const int bh = 22;
+    int cy = y + 8;
+
+    ObjectInstance* obj = map.getObject(selectedObject);
+    if (!obj) {
+        textRenderer.draw(renderer, "-- Object Definition --", x + 6, cy, {230, 230, 230, 255});
+        cy += 20;
+        const ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition);
+        if (!def) {
+            textRenderer.draw(renderer, "No object selected", x + 6, cy, {170, 170, 170, 255});
+            return;
+        }
+        textRenderer.draw(renderer, "Name: " + def->name, x + 6, cy, {200, 200, 200, 255}); cy += 16;
+        textRenderer.draw(renderer, "Type: " + ObjectDefinitionLibrary::typeName(def->type), x + 6, cy, {200, 200, 200, 255}); cy += 16;
+        textRenderer.draw(renderer, "Class: " + def->className, x + 6, cy, {200, 200, 200, 255}); cy += 16;
+        if (def->type == ObjectDefinitionType::MapObject)
+            textRenderer.draw(renderer, "Map: " + std::filesystem::path(def->mapPath).filename().string(), x + 6, cy, {170, 170, 170, 255});
+        else
+            textRenderer.draw(renderer, "Sprite: " + std::filesystem::path(def->spritePath).filename().string(), x + 6, cy, {170, 170, 170, 255});
+        return;
+    }
+
+    textRenderer.draw(renderer, "-- Placed Object --", x + 6, cy, {230, 230, 230, 255}); cy += 18;
+    textRenderer.draw(renderer, "Name: " + obj->name, x + 6, cy, {200, 200, 200, 255}); cy += 16;
+    textRenderer.draw(renderer, "Type: " + obj->type, x + 6, cy, {200, 200, 200, 255}); cy += 16;
+    textRenderer.draw(renderer, "Pos: " + std::to_string((int)obj->x) + ", " + std::to_string((int)obj->y), x + 6, cy, {180, 180, 180, 255}); cy += 16;
+    textRenderer.draw(renderer, "Sprite: " + std::filesystem::path(obj->spritePath).filename().string(), x + 6, cy, {180, 180, 180, 255}); cy += 16;
+    textRenderer.draw(renderer, "Collision: " + std::string(obj->collisionShape == CollisionShape::Box ? "Box" : obj->collisionShape == CollisionShape::Circle ? "Circle" : "None"), x + 6, cy, {200, 200, 200, 255}); cy += 16;
+
+    const int thirdW = (w - pad * 2 - gap * 2) / 3;
+    drawButton({x + pad, cy, thirdW, bh}, "None");
+    drawButton({x + pad + thirdW + gap, cy, thirdW, bh}, "Box");
+    drawButton({x + pad + (thirdW + gap) * 2, cy, thirdW, bh}, "Circle");
+    cy += bh + 8;
+
+    textRenderer.draw(renderer, "Origin: " + std::string(collisionOriginName(obj->collisionOrigin)), x + 6, cy, {200, 200, 200, 255}); cy += 16;
+    const int originW = (w - pad * 2 - gap) / 2;
+    const char* labels[] = {"TopLeft", "Center", "Bottom", "Top", "Left", "Right"};
+    for (int i = 0; i < 6; i++) {
+        drawButton({x + pad + (i % 2) * (originW + gap), cy + (i / 2) * (bh + gap), originW, bh}, labels[i]);
+    }
+    cy += 3 * (bh + gap) + 6;
+
+    textRenderer.draw(renderer, "Box: " + std::to_string((int)obj->collisionW) + " x " + std::to_string((int)obj->collisionH), x + 6, cy, {180, 180, 180, 255}); cy += 16;
+    const int halfW = (w - pad * 2 - gap) / 2;
+    drawButton({x + pad, cy, halfW, bh}, "W -");
+    drawButton({x + pad + halfW + gap, cy, halfW, bh}, "W +");
+    cy += bh + gap;
+    drawButton({x + pad, cy, halfW, bh}, "H -");
+    drawButton({x + pad + halfW + gap, cy, halfW, bh}, "H +");
+    cy += bh + gap;
+    textRenderer.draw(renderer, "Radius: " + std::to_string((int)obj->collisionRadius), x + 6, cy, {180, 180, 180, 255}); cy += 16;
+    drawButton({x + pad, cy, halfW, bh}, "R -");
+    drawButton({x + pad + halfW + gap, cy, halfW, bh}, "R +");
 }
 
 void Game::handleSettingsPanelClick(int mx, int my, int px, int contentY, int w) {
@@ -1107,6 +1363,7 @@ void Game::renderSettingsPanel(int x, int y, int w, int h) {
 void Game::paintTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
+    if (mx < objectPanelWidth) return;
     if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) return;
     if (showBottomBar && my >= screenHeight - bottomBarHeight) return;
     if (my < menuBarHeight) return;
@@ -1160,6 +1417,7 @@ void Game::paintTileAtMouse() {
 void Game::eraseTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
+    if (mx < objectPanelWidth) return;
     if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) return;
     if (showBottomBar && my >= screenHeight - bottomBarHeight) return;
     if (my < menuBarHeight) return;
@@ -1208,7 +1466,8 @@ void Game::render() {
     // Ghost preview
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-    if ((!(showTilePanel || showSettingsPanel) || mx < screenWidth - panelWidth) &&
+    if (mx >= objectPanelWidth &&
+        (!(showTilePanel || showSettingsPanel) || mx < screenWidth - panelWidth) &&
         !(my < menuBarHeight || (showBottomBar && my >= screenHeight - bottomBarHeight))) {
         float worldX = camera.x + mx / camera.zoom;
         float worldY = camera.y + my / camera.zoom;
@@ -1230,6 +1489,7 @@ void Game::render() {
         }
     }
 
+    renderObjectPanel();
     renderPanel();
     if (showBottomBar)
         renderBottomBar();
@@ -1323,6 +1583,74 @@ void Game::render() {
 
 // ── renderPanel ──────────────────────────────────────────────────────────────
 
+void Game::renderObjectPanel() {
+    SDL_Rect bg = {0, menuBarHeight, objectPanelWidth, screenHeight - menuBarHeight};
+    SDL_SetRenderDrawColor(renderer, 34, 34, 34, 255);
+    SDL_RenderFillRect(renderer, &bg);
+    SDL_SetRenderDrawColor(renderer, 70, 70, 70, 255);
+    SDL_RenderDrawLine(renderer, objectPanelWidth - 1, menuBarHeight, objectPanelWidth - 1, screenHeight);
+
+    int cy = menuBarHeight + 8;
+    textRenderer.draw(renderer, "Object Library", 8, cy, {230, 230, 230, 255});
+    cy += 26;
+
+    const int rowH = 28;
+    const int listY = cy;
+    const int listH = screenHeight - menuBarHeight - bottomBarHeight - 86;
+    SDL_Rect clip = {0, listY, objectPanelWidth, listH};
+    SDL_RenderSetClipRect(renderer, &clip);
+
+    const auto& defs = objectLibrary.all();
+    for (int i = 0; i < (int)defs.size(); i++) {
+        SDL_Rect row = {6, listY + i * rowH, objectPanelWidth - 12, rowH - 2};
+        bool selected = i == selectedObjectDefinition;
+        SDL_SetRenderDrawColor(renderer,
+            selected ? 82 : 48,
+            selected ? 82 : 48,
+            selected ? 82 : 48,
+            255);
+        SDL_RenderFillRect(renderer, &row);
+        SDL_SetRenderDrawColor(renderer, selected ? 220 : 90, selected ? 220 : 90, selected ? 220 : 90, 255);
+        SDL_RenderDrawRect(renderer, &row);
+        textRenderer.draw(renderer, defs[i].name, row.x + 6, row.y + 4, {235, 235, 235, 255});
+        textRenderer.draw(renderer, ObjectDefinitionLibrary::typeName(defs[i].type),
+            row.x + 108, row.y + 4, {160, 160, 160, 255});
+    }
+    SDL_RenderSetClipRect(renderer, nullptr);
+
+    int btnY = screenHeight - bottomBarHeight - 46;
+    int btnH = 24;
+    int btnW = (objectPanelWidth - 16) / 3;
+    struct Button { SDL_Rect r; const char* label; } buttons[] = {
+        {{4, btnY, btnW, btnH}, "+Map"},
+        {{6 + btnW, btnY, btnW, btnH}, "+Char"},
+        {{8 + btnW * 2, btnY, btnW, btnH}, "+Game"},
+    };
+
+    int mx, my;
+    SDL_GetMouseState(&mx, &my);
+    for (const auto& b : buttons) {
+        bool hover = mx >= b.r.x && mx < b.r.x + b.r.w && my >= b.r.y && my < b.r.y + b.r.h;
+        SDL_SetRenderDrawColor(renderer, hover ? 92 : 64, hover ? 92 : 64, hover ? 92 : 64, 255);
+        SDL_RenderFillRect(renderer, &b.r);
+        SDL_SetRenderDrawColor(renderer, hover ? 230 : 130, hover ? 230 : 130, hover ? 230 : 130, 255);
+        SDL_RenderDrawRect(renderer, &b.r);
+        textRenderer.drawCentered(renderer, b.label, b.r, {245, 245, 245, 255});
+    }
+
+    const ObjectDefinition* selected = objectLibrary.get(selectedObjectDefinition);
+    if (selected) {
+        SDL_Rect openCodeBtn = {4, screenHeight - bottomBarHeight - 20, objectPanelWidth - 8, 16};
+        bool hover = mx >= openCodeBtn.x && mx < openCodeBtn.x + openCodeBtn.w &&
+                     my >= openCodeBtn.y && my < openCodeBtn.y + openCodeBtn.h;
+        SDL_SetRenderDrawColor(renderer, hover ? 82 : 52, hover ? 82 : 52, hover ? 82 : 52, 255);
+        SDL_RenderFillRect(renderer, &openCodeBtn);
+        SDL_SetRenderDrawColor(renderer, hover ? 220 : 120, hover ? 220 : 120, hover ? 220 : 120, 255);
+        SDL_RenderDrawRect(renderer, &openCodeBtn);
+        textRenderer.drawCentered(renderer, "Open Code", openCodeBtn, {230, 230, 230, 255});
+    }
+}
+
 void Game::renderPanel() {
     if (!showTilePanel && !showSettingsPanel) return;
 
@@ -1336,14 +1664,15 @@ void Game::renderPanel() {
     // ── Panel layout toggle bar ───────────────────────────────────────────────
     const int toggleH = 20;
     const int toggleY = menuBarHeight;
-    int toggleW = panelWidth / 3;
+    int toggleW = panelWidth / 4;
 
     struct { const char* label; PanelLayout mode; } toggles[] = {
         {"Tiles",    PanelLayout::TilesOnly},
         {"Settings", PanelLayout::SettingsOnly},
+        {"Object",   PanelLayout::ObjectsOnly},
         {"Both",     PanelLayout::Both},
     };
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         SDL_Rect t = {px + i * toggleW, toggleY, toggleW, toggleH};
         SDL_SetRenderDrawColor(renderer,
             panelLayout == toggles[i].mode ? 70 : 45,
@@ -1371,6 +1700,9 @@ void Game::renderPanel() {
     }
     else if (panelLayout == PanelLayout::SettingsOnly) {
         renderSettingsPanel(px, contentY, panelWidth, contentH);
+    }
+    else if (panelLayout == PanelLayout::ObjectsOnly) {
+        renderObjectPropertiesPanel(px, contentY, panelWidth, contentH);
     }
     else { // Both
         int half = contentH / 2;

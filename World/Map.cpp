@@ -322,7 +322,9 @@ bool Map::save(const std::string& path) const {
         writeString(file, obj.type);
         writeString(file, obj.spritePath);
         int shape = static_cast<int>(obj.collisionShape);
+        int origin = static_cast<int>(obj.collisionOrigin);
         file.write(reinterpret_cast<const char*>(&shape), sizeof(int));
+        file.write(reinterpret_cast<const char*>(&origin), sizeof(int));
         file.write(reinterpret_cast<const char*>(&obj.collisionOffsetX), sizeof(float));
         file.write(reinterpret_cast<const char*>(&obj.collisionOffsetY), sizeof(float));
         file.write(reinterpret_cast<const char*>(&obj.collisionW), sizeof(float));
@@ -394,8 +396,11 @@ bool Map::load(const std::string& path) {
             readString(file, obj.type);
             readString(file, obj.spritePath);
             int shape = 0;
+            int origin = 0;
             file.read(reinterpret_cast<char*>(&shape), sizeof(int));
+            file.read(reinterpret_cast<char*>(&origin), sizeof(int));
             obj.collisionShape = static_cast<CollisionShape>(shape);
+            obj.collisionOrigin = static_cast<CollisionOrigin>(origin);
             file.read(reinterpret_cast<char*>(&obj.collisionOffsetX), sizeof(float));
             file.read(reinterpret_cast<char*>(&obj.collisionOffsetY), sizeof(float));
             file.read(reinterpret_cast<char*>(&obj.collisionW), sizeof(float));

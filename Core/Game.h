@@ -14,6 +14,7 @@
 #include "../Editor/Toolbar.h"
 #include "../Editor/UndoSystem.h"
 #include "../Editor/LayerState.h"
+#include "../Editor/ObjectDefinitionLibrary.h"
 
 // ── Editor mode ───────────────────────────────────────────────────────────────
 enum class EditorMode {
@@ -96,6 +97,7 @@ struct NewMapDialog {
 enum class PanelLayout {
     TilesOnly,
     SettingsOnly,
+    ObjectsOnly,
     Both           // tiles on top, settings on bottom
 };
 
@@ -138,6 +140,8 @@ private:
     MenuBar        menuBar;
     MapManager     mapManager;
     TilesetManager tilesetManager;
+    ObjectDefinitionLibrary objectLibrary;
+    int selectedObjectDefinition = -1;
 
     static constexpr int menuBarHeight  = MenuBar::HEIGHT;
     static constexpr int toolbarStartX  = 250; // after menu tabs
@@ -155,10 +159,13 @@ private:
     // Index paths
     static constexpr const char* MAPS_INDEX     = "../Maps/maps.index";
     static constexpr const char* TILESETS_INDEX = "../Assets/Tilesets/tilesets.index";
+    static constexpr const char* OBJECTS_INDEX  = "../Assets/Objects/objects.index";
+    static constexpr const char* GAMEOBJECTS_DIR = "../GameObjects";
 
     // ── Layout constants ──────────────────────────────────────────────────────
     static constexpr int screenWidth    = 1280;
     static constexpr int screenHeight   = 720;
+    static constexpr int objectPanelWidth = 220;
     static constexpr int panelWidth     = 200;
     static constexpr int bottomBarHeight = 60;
     static constexpr int tabBarHeight   = 36;   // category tabs at top of panel
@@ -198,8 +205,10 @@ private:
     void centerCameraOnMap();
     void createNewMap();
     void renderSettingsPanel(int x, int y, int w, int h);
+    void renderObjectPropertiesPanel(int x, int y, int w, int h);
 
     // panel
+    void renderObjectPanel();
     void renderPanel();
     void renderBottomBar();
     void renderTilesPanelContent(int x, int y, int w, int h);
@@ -221,9 +230,11 @@ private:
     void handlePaintModeEvents(const SDL_Event& e, const Uint8* keys);
     void handleNamingInput(const SDL_Event& e);
     void advancePendingImport();
+    void handleObjectPanelClick(int mx, int my);
     void handlePanelClick(int mx, int my);
     void handleTilesPanelClick(int mx, int my, int px, int contentY, int w, int h);
     void handleSettingsPanelClick(int mx, int my, int px, int contentY, int w);
+    void handleObjectPropertiesPanelClick(int mx, int my, int px, int contentY, int w);
 
     void applyUndo(const StrokeCommand& cmd);
     void applyUndo(const PlaceObjectCommand& cmd);

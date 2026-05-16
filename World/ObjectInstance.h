@@ -20,6 +20,15 @@ enum class CollisionShape {
     Circle
 };
 
+enum class CollisionOrigin {
+    TopLeft,
+    Center,
+    Bottom,
+    Top,
+    Left,
+    Right
+};
+
 struct ObjectInstance {
     int   tileID = -1;
     float x = 0.0f;
@@ -31,6 +40,7 @@ struct ObjectInstance {
     std::string spritePath;
 
     CollisionShape collisionShape = CollisionShape::Box;
+    CollisionOrigin collisionOrigin = CollisionOrigin::TopLeft;
     float collisionOffsetX = 0.0f;
     float collisionOffsetY = 0.0f;
     float collisionW = 0.0f;
