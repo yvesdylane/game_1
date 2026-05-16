@@ -810,6 +810,31 @@ void Game::handleSettingsPanelClick(int mx, int my, int px, int contentY, int w)
     const int bw  = (w - pad * 2 - gap) / 2;
 
     int cy = contentY + 8;
+
+    ObjectInstance* selected = map.getObject(selectedObject);
+    if (selected) {
+        cy += 18; // object heading
+        cy += 16; // name
+        cy += 16; // type
+        cy += 16; // position
+        cy += 16; // sprite
+        cy += 16; // collision label
+
+        const int thirdW = (w - pad * 2 - gap * 2) / 3;
+        SDL_Rect noShape = {px + pad, cy, thirdW, bh};
+        SDL_Rect box     = {px + pad + thirdW + gap, cy, thirdW, bh};
+        SDL_Rect circle  = {px + pad + (thirdW + gap) * 2, cy, thirdW, bh};
+        if (hit(noShape)) { selected->collisionShape = CollisionShape::None; return; }
+        if (hit(box))     { selected->collisionShape = CollisionShape::Box; return; }
+        if (hit(circle))  { selected->collisionShape = CollisionShape::Circle; return; }
+        cy += bh + 8;
+
+        cy += 16; // properties heading
+        int shown = std::min(3, (int)selected->properties.size());
+        cy += shown * 14;
+        cy += 10;
+    }
+
     cy += 18; // map heading
     cy += 16; // size line
     cy += 24; // tile line
@@ -934,7 +959,75 @@ void Game::renderSettingsPanel(int x, int y, int w, int h) {
         textRenderer.drawCentered(renderer, label, r, {245, 245, 245, 255});
     };
 
+    const int pad = 6;
+    const int gap = 2;
+    const int bw  = (w - pad * 2 - gap) / 2;
+    const int bh  = 22;
+
     int cy = y + 8;
+
+    ObjectInstance* selected = map.getObject(selectedObject);
+    if (selected) {
+        auto shapeText = [](CollisionShape shape) {
+            switch (shape) {
+                case CollisionShape::None:   return "None";
+                case CollisionShape::Box:    return "Box";
+                case CollisionShape::Circle: return "Circle";
+            }
+            return "None";
+        };
+
+        textRenderer.draw(renderer, "-- Object --", x + 6, cy, {235, 235, 235, 255});
+        cy += 18;
+        textRenderer.draw(renderer, "Name: " + selected->name, x + 6, cy, {200, 200, 200, 255});
+        cy += 16;
+        textRenderer.draw(renderer, "Type: " + selected->type, x + 6, cy, {200, 200, 200, 255});
+        cy += 16;
+        textRenderer.draw(renderer,
+            "Pos: " + std::to_string((int)selected->x) + ", " + std::to_string((int)selected->y),
+            x + 6, cy, {175, 175, 175, 255});
+        cy += 16;
+        std::string spriteName = std::filesystem::path(selected->spritePath).filename().string();
+        textRenderer.draw(renderer, "Sprite: " + spriteName, x + 6, cy, {175, 175, 175, 255});
+        cy += 16;
+        textRenderer.draw(renderer,
+            "Collision: " + std::string(shapeText(selected->collisionShape)),
+            x + 6, cy, {200, 200, 200, 255});
+        cy += 16;
+
+        const int thirdW = (w - pad * 2 - gap * 2) / 3;
+        SDL_Rect noShape = {x + pad, cy, thirdW, bh};
+        SDL_Rect box     = {x + pad + thirdW + gap, cy, thirdW, bh};
+        SDL_Rect circle  = {x + pad + (thirdW + gap) * 2, cy, thirdW, bh};
+        drawButton(noShape, "None");
+        drawButton(box, "Box");
+        drawButton(circle, "Circle");
+        cy += bh + 8;
+
+        if (selected->collisionShape == CollisionShape::Box) {
+            textRenderer.draw(renderer,
+                "Box: " + std::to_string((int)selected->collisionW) + " x " +
+                std::to_string((int)selected->collisionH),
+                x + 6, cy, {175, 175, 175, 255});
+            cy += 14;
+        } else if (selected->collisionShape == CollisionShape::Circle) {
+            textRenderer.draw(renderer,
+                "Radius: " + std::to_string((int)selected->collisionRadius),
+                x + 6, cy, {175, 175, 175, 255});
+            cy += 14;
+        }
+
+        textRenderer.draw(renderer, "Properties:", x + 6, cy, {200, 200, 200, 255});
+        cy += 16;
+        int shown = std::min(3, (int)selected->properties.size());
+        for (int i = 0; i < shown; i++) {
+            const auto& prop = selected->properties[i];
+            textRenderer.draw(renderer, prop.key + ": " + prop.value,
+                x + 12, cy, {170, 170, 170, 255});
+            cy += 14;
+        }
+        cy += 10;
+    }
 
     textRenderer.draw(renderer, "-- Map --", x + 6, cy, {210, 210, 210, 255});
     cy += 18;
@@ -971,11 +1064,6 @@ void Game::renderSettingsPanel(int x, int y, int w, int h) {
         amtField.x + 4, amtField.y + 4, {245, 245, 245, 255});
     textRenderer.draw(renderer, "tiles", x + 120, cy + 4, {145, 145, 145, 255});
     cy += 28;
-
-    const int pad = 6;
-    const int gap = 2;
-    const int bw  = (w - pad * 2 - gap) / 2;
-    const int bh  = 22;
 
     textRenderer.draw(renderer, "Expand:", x + 6, cy, {200, 200, 200, 255});
     cy += 16;
@@ -1046,6 +1134,17 @@ void Game::paintTileAtMouse() {
         obj.x      = snapX;
         obj.y      = snapY;
         obj.layer  = selectedLayer;
+        obj.name   = def->label.empty()
+            ? "GameObject " + std::to_string((int)map.getObjects().size() + 1)
+            : def->label;
+        obj.type = "Object";
+        obj.spritePath = def->imagePath;
+        obj.collisionShape = CollisionShape::Box;
+        obj.collisionW = static_cast<float>(def->srcW);
+        obj.collisionH = static_cast<float>(def->srcH);
+        obj.collisionRadius = std::max(def->srcW, def->srcH) * 0.5f;
+        obj.properties.push_back({"tag", "Untagged"});
+        obj.properties.push_back({"solid", "true"});
         int idx = map.addObject(obj);
         undoSystem.recordPlaceObject(idx, obj); // ✅
     } else {

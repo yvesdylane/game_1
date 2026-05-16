@@ -2,6 +2,28 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <cstdint>
+
+
+namespace {
+constexpr std::uint32_t OBJECT_META_MARKER = 0x4f424a50; // OBJP
+
+void writeString(std::ofstream& file, const std::string& value) {
+    int len = static_cast<int>(value.size());
+    file.write(reinterpret_cast<const char*>(&len), sizeof(int));
+    if (len > 0)
+        file.write(value.data(), len);
+}
+
+bool readString(std::ifstream& file, std::string& value) {
+    int len = 0;
+    if (!file.read(reinterpret_cast<char*>(&len), sizeof(int))) return false;
+    if (len < 0 || len > 1024 * 1024) return false;
+    value.assign(len, '\0');
+    if (len > 0 && !file.read(value.data(), len)) return false;
+    return true;
+}
+}
 
 Map::Map() {
     init(DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT, DEFAULT_TILE_SIZE);
@@ -148,6 +170,16 @@ void Map::insertObject(int index, const ObjectInstance& obj) {
         objects.insert(objects.begin() + index, obj);
 }
 
+ObjectInstance* Map::getObject(int index) {
+    if (index < 0 || index >= (int)objects.size()) return nullptr;
+    return &objects[index];
+}
+
+const ObjectInstance* Map::getObject(int index) const {
+    if (index < 0 || index >= (int)objects.size()) return nullptr;
+    return &objects[index];
+}
+
 // ── Render ────────────────────────────────────────────────────────────────────
 
 void Map::render(SDL_Renderer* renderer, const Camera& camera,
@@ -229,6 +261,26 @@ void Map::render(SDL_Renderer* renderer, const Camera& camera,
             SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
             SDL_SetRenderDrawColor(renderer, 255, 220, 0, 255);
             SDL_RenderDrawRect(renderer, &hl);
+
+            if (obj.collisionShape == CollisionShape::Box) {
+                SDL_Rect c = {
+                    static_cast<int>((obj.x + obj.collisionOffsetX - camera.x) * camera.zoom),
+                    static_cast<int>((obj.y + obj.collisionOffsetY - camera.y) * camera.zoom),
+                    static_cast<int>(obj.collisionW * camera.zoom),
+                    static_cast<int>(obj.collisionH * camera.zoom)
+                };
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                SDL_RenderDrawRect(renderer, &c);
+            } else if (obj.collisionShape == CollisionShape::Circle) {
+                int cx = static_cast<int>((obj.x + obj.collisionOffsetX + obj.collisionRadius - camera.x) * camera.zoom);
+                int cy = static_cast<int>((obj.y + obj.collisionOffsetY + obj.collisionRadius - camera.y) * camera.zoom);
+                int r  = static_cast<int>(obj.collisionRadius * camera.zoom);
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                SDL_RenderDrawLine(renderer, cx - r, cy, cx + r, cy);
+                SDL_RenderDrawLine(renderer, cx, cy - r, cx, cy + r);
+                SDL_Rect c = {cx - r, cy - r, r * 2, r * 2};
+                SDL_RenderDrawRect(renderer, &c);
+            }
         }
     }
 }
@@ -261,6 +313,28 @@ bool Map::save(const std::string& path) const {
         file.write(reinterpret_cast<const char*>(&obj.x),      sizeof(float));
         file.write(reinterpret_cast<const char*>(&obj.y),      sizeof(float));
         file.write(reinterpret_cast<const char*>(&obj.layer),  sizeof(int));
+    }
+
+    file.write(reinterpret_cast<const char*>(&OBJECT_META_MARKER), sizeof(std::uint32_t));
+    file.write(reinterpret_cast<const char*>(&objCount), sizeof(int));
+    for (const auto& obj : objects) {
+        writeString(file, obj.name);
+        writeString(file, obj.type);
+        writeString(file, obj.spritePath);
+        int shape = static_cast<int>(obj.collisionShape);
+        file.write(reinterpret_cast<const char*>(&shape), sizeof(int));
+        file.write(reinterpret_cast<const char*>(&obj.collisionOffsetX), sizeof(float));
+        file.write(reinterpret_cast<const char*>(&obj.collisionOffsetY), sizeof(float));
+        file.write(reinterpret_cast<const char*>(&obj.collisionW), sizeof(float));
+        file.write(reinterpret_cast<const char*>(&obj.collisionH), sizeof(float));
+        file.write(reinterpret_cast<const char*>(&obj.collisionRadius), sizeof(float));
+
+        int propCount = static_cast<int>(obj.properties.size());
+        file.write(reinterpret_cast<const char*>(&propCount), sizeof(int));
+        for (const auto& prop : obj.properties) {
+            writeString(file, prop.key);
+            writeString(file, prop.value);
+        }
     }
 
     std::cout << "Map saved: " << mapWidth << "x" << mapHeight
@@ -306,6 +380,38 @@ bool Map::load(const std::string& path) {
         file.read(reinterpret_cast<char*>(&obj.y),      sizeof(float));
         file.read(reinterpret_cast<char*>(&obj.layer),  sizeof(int));
         objects.push_back(obj);
+    }
+
+    std::uint32_t marker = 0;
+    if (file.read(reinterpret_cast<char*>(&marker), sizeof(std::uint32_t)) &&
+        marker == OBJECT_META_MARKER) {
+        int metaCount = 0;
+        file.read(reinterpret_cast<char*>(&metaCount), sizeof(int));
+        int count = std::min(metaCount, objCount);
+        for (int i = 0; i < count; i++) {
+            ObjectInstance& obj = objects[i];
+            readString(file, obj.name);
+            readString(file, obj.type);
+            readString(file, obj.spritePath);
+            int shape = 0;
+            file.read(reinterpret_cast<char*>(&shape), sizeof(int));
+            obj.collisionShape = static_cast<CollisionShape>(shape);
+            file.read(reinterpret_cast<char*>(&obj.collisionOffsetX), sizeof(float));
+            file.read(reinterpret_cast<char*>(&obj.collisionOffsetY), sizeof(float));
+            file.read(reinterpret_cast<char*>(&obj.collisionW), sizeof(float));
+            file.read(reinterpret_cast<char*>(&obj.collisionH), sizeof(float));
+            file.read(reinterpret_cast<char*>(&obj.collisionRadius), sizeof(float));
+
+            int propCount = 0;
+            file.read(reinterpret_cast<char*>(&propCount), sizeof(int));
+            obj.properties.clear();
+            for (int p = 0; p < propCount; p++) {
+                ObjectProperty prop;
+                readString(file, prop.key);
+                readString(file, prop.value);
+                obj.properties.push_back(prop);
+            }
+        }
     }
 
     std::cout << "Map loaded: " << mapWidth << "x" << mapHeight

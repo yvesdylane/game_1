@@ -6,11 +6,38 @@
 #define GAME1_OBJECTINSTANCE_H
 
 #pragma once
+#include <string>
+#include <vector>
+
+struct ObjectProperty {
+    std::string key;
+    std::string value;
+};
+
+enum class CollisionShape {
+    None,
+    Box,
+    Circle
+};
 
 struct ObjectInstance {
-    int   tileID;
-    float x, y;     // world position in pixels (top-left of object)
-    int   layer;
+    int   tileID = -1;
+    float x = 0.0f;
+    float y = 0.0f;     // world position in pixels (top-left of object)
+    int   layer = 0;
+
+    std::string name = "GameObject";
+    std::string type = "Object";
+    std::string spritePath;
+
+    CollisionShape collisionShape = CollisionShape::Box;
+    float collisionOffsetX = 0.0f;
+    float collisionOffsetY = 0.0f;
+    float collisionW = 0.0f;
+    float collisionH = 0.0f;
+    float collisionRadius = 0.0f;
+
+    std::vector<ObjectProperty> properties;
 };
 
 #endif //GAME1_OBJECTINSTANCE_H

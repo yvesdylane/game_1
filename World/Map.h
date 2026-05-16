@@ -54,6 +54,8 @@ public:
     void removeObject(int index);
     void insertObject(int index, const ObjectInstance& obj);
     const std::vector<ObjectInstance>& getObjects() const { return objects; }
+    ObjectInstance* getObject(int index);
+    const ObjectInstance* getObject(int index) const;
 
     // Render
     void render(SDL_Renderer* renderer, const Camera& camera,
