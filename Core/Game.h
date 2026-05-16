@@ -165,6 +165,7 @@ private:
     static constexpr int panelTileSize  = 48;   // tile preview size in pane
     // helpers
     std::string openFileDialog(); // wraps zenity on Linux
+    std::string copyImageToTilesetImages(const std::string& imagePath);
     // text rendering
     TextRenderer textRenderer;
     bool showGrid = true;  // G key toggles

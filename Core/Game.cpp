@@ -1,6 +1,7 @@
 #include "Game.h"
 #include <iostream>
 #include <cstdio>
+#include <filesystem>
 #include "tinyfiledialogs.h"
 #include "../Editor/FileUtils.h"
 
@@ -1475,14 +1476,49 @@ void Game::renderBottomBar() {
 
 // ── Tileset editor ────────────────────────────────────────────────────────────
 
-void Game::openTilesetEditor(const std::string& imagePath) {
-    if (!tileRenderer.loadTexture(renderer, imagePath)) return;
+std::string Game::copyImageToTilesetImages(const std::string& imagePath) {
+    namespace fs = std::filesystem;
 
-    SDL_Texture* tex = tileRenderer.getTexture(imagePath);
+    const fs::path source(imagePath);
+    const fs::path targetDir = fs::path("../Assets/Tilesets/Images");
+
+    try {
+        if (!fs::exists(source) || !fs::is_regular_file(source))
+            return imagePath;
+
+        fs::create_directories(targetDir);
+
+        fs::path target = targetDir / source.filename();
+        const fs::path absSource = fs::weakly_canonical(source);
+        const fs::path absTargetDir = fs::weakly_canonical(targetDir);
+
+        if (absSource.parent_path() == absTargetDir)
+            return (targetDir / source.filename()).generic_string();
+
+        int suffix = 1;
+        while (fs::exists(target)) {
+            target = targetDir / (source.stem().string() + "_" +
+                                  std::to_string(suffix) + source.extension().string());
+            suffix++;
+        }
+
+        fs::copy_file(source, target);
+        return target.generic_string();
+    } catch (const std::exception& e) {
+        std::cout << "Failed to copy tileset image: " << e.what() << "\n";
+        return imagePath;
+    }
+}
+
+void Game::openTilesetEditor(const std::string& imagePath) {
+    std::string copiedPath = copyImageToTilesetImages(imagePath);
+    if (!tileRenderer.loadTexture(renderer, copiedPath)) return;
+
+    SDL_Texture* tex = tileRenderer.getTexture(copiedPath);
     int w, h;
     SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
 
-    tsEditor.imagePath = imagePath;
+    tsEditor.imagePath = copiedPath;
     tsEditor.reset(w, h, 64, 64);
     editorMode = EditorMode::TilesetEditor;
 }
@@ -1664,16 +1700,17 @@ void Game::renderTilesetEditor() {
 
 void Game::importSingleImage(const std::string& path) {
     if (path.empty()) return;
-    if (!tileRenderer.loadTexture(renderer, path)) return;
+    std::string copiedPath = copyImageToTilesetImages(path);
+    if (!tileRenderer.loadTexture(renderer, copiedPath)) return;
 
-    SDL_Texture* tex = tileRenderer.getTexture(path);
+    SDL_Texture* tex = tileRenderer.getTexture(copiedPath);
     int w, h;
     SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
 
     if (tsEditor.mode == TilesetEditorMode::SingleObject) {
         // Whole image as one tile
         TileDefinition def;
-        def.imagePath = path;
+        def.imagePath = copiedPath;
         def.srcX      = 0;
         def.srcY      = 0;
         def.srcW      = w;
@@ -1693,7 +1730,7 @@ void Game::importSingleImage(const std::string& path) {
         for (int row = 0; row < rows; row++) {
             for (int col = 0; col < cols; col++) {
                 TileDefinition def;
-                def.imagePath = path;
+                def.imagePath = copiedPath;
                 def.srcX      = col * tw;
                 def.srcY      = row * th;
                 def.srcW      = tw;
