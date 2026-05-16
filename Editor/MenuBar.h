@@ -54,7 +54,7 @@ public:
 	bool isOpen() const { return openMenu >= 0; }
 
 private:
-	int openMenu = -1; // -1=none, 0=File, 1=Maps, 2=Tilesets
+	int openMenu = -1; // -1=none, 0=File, 1=Maps, 2=Tilesets, 3=View
 
 	void renderDropdown(SDL_Renderer* renderer, TextRenderer& text,
 						int x, const std::vector<std::string>& items,

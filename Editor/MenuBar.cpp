@@ -14,6 +14,7 @@ static constexpr int BAR_H     = MenuBar::HEIGHT;
 static constexpr int TAB_FILE_X     =   0;
 static constexpr int TAB_MAPS_X     =  60;
 static constexpr int TAB_TILESETS_X = 120;
+static constexpr int TAB_VIEW_X     = 180;
 static constexpr int TAB_W          =  60;
 
 void MenuBar::render(SDL_Renderer* renderer, TextRenderer& text,
@@ -34,7 +35,8 @@ void MenuBar::render(SDL_Renderer* renderer, TextRenderer& text,
     Tab tabs[] = {
         {TAB_FILE_X,     "File",     0},
         {TAB_MAPS_X,     "Maps",     1},
-        {TAB_TILESETS_X, "Tilesets", 2}
+        {TAB_TILESETS_X, "Tilesets", 2},
+        {TAB_VIEW_X,     "View",     3}
     };
 
     for (auto& tab : tabs) {
@@ -77,6 +79,12 @@ void MenuBar::render(SDL_Renderer* renderer, TextRenderer& text,
         items.push_back("──────────");
         items.push_back("+ Load Tileset");
         renderDropdown(renderer, text, TAB_TILESETS_X, items, screenWidth);
+    }
+    else if (openMenu == 3) { // View
+        std::vector<std::string> items = {
+            "Tile Panel", "Settings Panel", "Bottom Bar", "Toolbar", "Grid", "Center Camera"
+        };
+        renderDropdown(renderer, text, TAB_VIEW_X, items, screenWidth);
     }
 }
 
@@ -128,6 +136,9 @@ MenuResult MenuBar::handleClick(int mx, int my,
         if (mx >= TAB_TILESETS_X && mx < TAB_TILESETS_X + TAB_W) {
             openMenu = (openMenu == 2) ? -1 : 2; return {};
         }
+        if (mx >= TAB_VIEW_X && mx < TAB_VIEW_X + TAB_W) {
+            openMenu = (openMenu == 3) ? -1 : 3; return {};
+        }
         openMenu = -1;
         return {};
     }
@@ -136,7 +147,8 @@ MenuResult MenuBar::handleClick(int mx, int my,
     if (openMenu >= 0) {
         int tabX = (openMenu == 0) ? TAB_FILE_X
                  : (openMenu == 1) ? TAB_MAPS_X
-                 :                   TAB_TILESETS_X;
+                 : (openMenu == 2) ? TAB_TILESETS_X
+                 :                   TAB_VIEW_X;
         int dropX = std::min(tabX, screenWidth - MENU_W);
         int dropY = BAR_H;
 
@@ -164,6 +176,15 @@ MenuResult MenuBar::handleClick(int mx, int my,
                     return {MenuAction::RemoveTileset, row};
                 if (row == tsCount + 1) // "+ Load Tileset"
                     return {MenuAction::LoadTileset};
+            }
+            else if (openMenu == 3) { // View
+                openMenu = -1;
+                if (row == 0) return {MenuAction::ToggleTilePanel};
+                if (row == 1) return {MenuAction::ToggleSettingsPanel};
+                if (row == 2) return {MenuAction::ToggleBottomBar};
+                if (row == 3) return {MenuAction::ToggleToolbar};
+                if (row == 4) return {MenuAction::ToggleGrid};
+                if (row == 5) return {MenuAction::CenterCamera};
             }
         } else {
             // Click outside dropdown = close

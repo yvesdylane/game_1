@@ -140,7 +140,7 @@ private:
     TilesetManager tilesetManager;
 
     static constexpr int menuBarHeight  = MenuBar::HEIGHT;
-    static constexpr int toolbarStartX  = 200; // after menu tabs
+    static constexpr int toolbarStartX  = 250; // after menu tabs
     // Total top UI height
     static constexpr int topBarHeight   = MenuBar::HEIGHT; // toolbar lives IN menu bar row
     // map creation and state

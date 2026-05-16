@@ -136,7 +136,7 @@ bool Game::handleMenuEvents(const SDL_Event& e) {
 
     // Toolbar tool selection (lives in menu bar row)
     if (my >= 0 && my < menuBarHeight) {
-        ToolMode newMode = toolbar.handleClick(mx, my, toolMode, toolbarStartX);
+        ToolMode newMode = showToolbar ? toolbar.handleClick(mx, my, toolMode, toolbarStartX) : toolMode;
         if (newMode != toolMode) {
             toolMode = newMode;
             return true;
@@ -211,6 +211,30 @@ bool Game::handleMenuEvents(const SDL_Event& e) {
         case MenuAction::RemoveTileset:
             tilesetManager.removeTileset(result.payload);
             tilesetManager.save(TILESETS_INDEX);
+            break;
+
+        case MenuAction::ToggleTilePanel:
+            showTilePanel = !showTilePanel;
+            break;
+
+        case MenuAction::ToggleSettingsPanel:
+            showSettingsPanel = !showSettingsPanel;
+            break;
+
+        case MenuAction::ToggleBottomBar:
+            showBottomBar = !showBottomBar;
+            break;
+
+        case MenuAction::ToggleToolbar:
+            showToolbar = !showToolbar;
+            break;
+
+        case MenuAction::ToggleGrid:
+            showGrid = !showGrid;
+            break;
+
+        case MenuAction::CenterCamera:
+            centerCameraOnMap();
             break;
 
         default: break;
@@ -451,6 +475,33 @@ void Game::handleNamingInput(const SDL_Event& e) {
 
 void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
 
+    if (expandInputFocused) {
+        if (e.type == SDL_TEXTINPUT) {
+            std::string ch(e.text.text);
+            if (!ch.empty() && std::isdigit(ch[0])) {
+                expandAmountInput += ch;
+                try { expandAmount = std::max(1, std::stoi(expandAmountInput)); }
+                catch (...) { expandAmount = 1; }
+            }
+            return;
+        }
+        if (e.type == SDL_KEYDOWN) {
+            if (e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE && !expandAmountInput.empty()) {
+                expandAmountInput.pop_back();
+                try { expandAmount = std::max(1, std::stoi(expandAmountInput)); }
+                catch (...) { expandAmount = 1; }
+            }
+            if (e.key.keysym.scancode == SDL_SCANCODE_RETURN ||
+                e.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+                if (expandAmountInput.empty()) expandAmountInput = "1";
+                expandAmount = std::max(1, std::stoi(expandAmountInput));
+                expandInputFocused = false;
+                SDL_StopTextInput();
+            }
+            return;
+        }
+    }
+
     // ── Keyboard ──────────────────────────────────────────────────────────────
     if (e.type == SDL_KEYDOWN) {
         if (e.key.keysym.scancode == SDL_SCANCODE_S && keys[SDL_SCANCODE_LCTRL]) {
@@ -525,13 +576,13 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
         bool consumed = false;
 
         // Right panel
-        if (mx >= screenWidth - panelWidth) {
+        if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) {
             consumed = true;
             handlePanelClick(mx, my);
         }
 
         // ✅ Bottom bar — layer select + eye/lock — all here where mx/my/consumed exist
-        if (!consumed && my >= screenHeight - bottomBarHeight) {
+        if (!consumed && showBottomBar && my >= screenHeight - bottomBarHeight) {
             for (int i = 0; i < 5; i++) {
                 int bx = 10 + i * 90;
                 int by = screenHeight - 54;
@@ -597,9 +648,9 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
     if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_RIGHT) {
         int mx = e.button.x;
         int my = e.button.y;
-        if (mx < screenWidth - panelWidth &&
+        if ((!(showTilePanel || showSettingsPanel) || mx < screenWidth - panelWidth) &&
             my > menuBarHeight &&
-            my < screenHeight - bottomBarHeight) {
+            (!showBottomBar || my < screenHeight - bottomBarHeight)) {
             undoSystem.beginStroke(true);
             eraseTileAtMouse();
             undoSystem.endStroke();
@@ -640,7 +691,7 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
     if (e.type == SDL_MOUSEWHEEL) {
         int mx, my;
         SDL_GetMouseState(&mx, &my);
-        if (mx >= screenWidth - panelWidth) {
+        if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) {
             panelScrollY = std::max(0, panelScrollY - e.wheel.y * panelTileSize);
         } else {
             float scrollSpeed = 50.0f;
@@ -661,6 +712,8 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
 }
 
 void Game::handlePanelClick(int mx, int my) {
+    if (!showTilePanel && !showSettingsPanel) return;
+
     const int px       = screenWidth - panelWidth;
     const int toggleH  = 20;
     const int toggleY  = menuBarHeight;
@@ -681,7 +734,7 @@ void Game::handlePanelClick(int mx, int my) {
     int contentH = screenHeight - contentY - 42;
 
     // Import buttons
-    if (my >= screenHeight - 40) {
+    if (showTilePanel && my >= screenHeight - 40) {
         int thirdW = (panelWidth - 12) / 3;
         int localX = mx - px;
         if (localX < thirdW + 4) {
@@ -694,7 +747,13 @@ void Game::handlePanelClick(int mx, int my) {
     }
 
     // Route to correct panel
-    if (panelLayout == PanelLayout::TilesOnly) {
+    if (!showTilePanel) {
+        handleSettingsPanelClick(mx, my, px, contentY, panelWidth);
+    }
+    else if (!showSettingsPanel) {
+        handleTilesPanelClick(mx, my, px, contentY, panelWidth, contentH);
+    }
+    else if (panelLayout == PanelLayout::TilesOnly) {
         handleTilesPanelClick(mx, my, px, contentY, panelWidth, contentH);
     }
     else if (panelLayout == PanelLayout::SettingsOnly) {
@@ -739,71 +798,66 @@ void Game::handleTilesPanelClick(int mx, int my, int px, int contentY, int w, in
 }
 
 void Game::handleSettingsPanelClick(int mx, int my, int px, int contentY, int w) {
-    // Recalculate button positions matching renderSettingsPanel
-    // Amount field
-    SDL_Rect amtField = {px + 65, contentY + 54, 50, 22};
-    if (mx >= amtField.x && mx <= amtField.x + amtField.w &&
-        my >= amtField.y && my <= amtField.y + amtField.h) {
+    auto hit = [&](const SDL_Rect& r) {
+        return mx >= r.x && mx < r.x + r.w &&
+               my >= r.y && my < r.y + r.h;
+    };
+
+    const int pad = 6;
+    const int gap = 2;
+    const int bh  = 22;
+    const int bw  = (w - pad * 2 - gap) / 2;
+
+    int cy = contentY + 8;
+    cy += 18; // map heading
+    cy += 16; // size line
+    cy += 24; // tile line
+    cy += 18; // resize heading
+
+    SDL_Rect amtField = {px + 65, cy, 50, 22};
+    if (hit(amtField)) {
         expandInputFocused = true;
         SDL_StartTextInput();
         return;
-        }
+    }
 
     expandInputFocused = false;
+    SDL_StopTextInput();
 
-    // Expand buttons
-    int cy = contentY + 88;
-    int bw = (w - 16) / 2;
-    int bh = 22;
+    cy += 28;
+    cy += 16; // expand label
 
-    // + Top
-    if (my >= cy && my < cy + bh) {
-        map.expandTop(expandAmount);
-        centerCameraOnMap(); return;
-    }
-    cy += bh + 2;
-
-    // + Left / + Right
-    if (my >= cy && my < cy + bh) {
-        if (mx < px + w / 2) map.expandLeft(expandAmount);
-        else                  map.expandRight(expandAmount);
-        return;
-    }
-    cy += bh + 2;
-
-    // + Bottom
-    if (my >= cy && my < cy + bh) {
-        map.expandBottom(expandAmount); return;
-    }
+    SDL_Rect eTop   = {px + pad, cy, w - pad * 2, bh};
+    cy += bh + gap;
+    SDL_Rect eLeft  = {px + pad, cy, bw, bh};
+    SDL_Rect eRight = {px + pad + bw + gap, cy, bw, bh};
+    cy += bh + gap;
+    SDL_Rect eBot   = {px + pad, cy, w - pad * 2, bh};
     cy += bh + 8;
 
-    // Shrink section label
-    cy += 16;
+    cy += 16; // shrink label
 
-    // - Top
-    if (my >= cy && my < cy + bh) {
-        map.shrinkTop(expandAmount); return;
-    }
-    cy += bh + 2;
-
-    // - Left / - Right
-    if (my >= cy && my < cy + bh) {
-        if (mx < px + w / 2) map.shrinkLeft(expandAmount);
-        else                  map.shrinkRight(expandAmount);
-        return;
-    }
-    cy += bh + 2;
-
-    // - Bottom
-    if (my >= cy && my < cy + bh) {
-        map.shrinkBottom(expandAmount); return;
-    }
+    SDL_Rect sTop   = {px + pad, cy, w - pad * 2, bh};
+    cy += bh + gap;
+    SDL_Rect sLeft  = {px + pad, cy, bw, bh};
+    SDL_Rect sRight = {px + pad + bw + gap, cy, bw, bh};
+    cy += bh + gap;
+    SDL_Rect sBot   = {px + pad, cy, w - pad * 2, bh};
     cy += bh + 8;
 
-    // Center camera
-    if (my >= cy && my < cy + bh) {
-        centerCameraOnMap(); return;
-    }
+    SDL_Rect centerBtn = {px + pad, cy, w - pad * 2, bh};
+
+    if (hit(eTop))   { map.expandTop(expandAmount);    centerCameraOnMap(); return; }
+    if (hit(eLeft))  { map.expandLeft(expandAmount);   centerCameraOnMap(); return; }
+    if (hit(eRight)) { map.expandRight(expandAmount);  centerCameraOnMap(); return; }
+    if (hit(eBot))   { map.expandBottom(expandAmount); centerCameraOnMap(); return; }
+
+    if (hit(sTop))   { map.shrinkTop(expandAmount);    centerCameraOnMap(); return; }
+    if (hit(sLeft))  { map.shrinkLeft(expandAmount);   centerCameraOnMap(); return; }
+    if (hit(sRight)) { map.shrinkRight(expandAmount);  centerCameraOnMap(); return; }
+    if (hit(sBot))   { map.shrinkBottom(expandAmount); centerCameraOnMap(); return; }
+
+    if (hit(centerBtn)) { centerCameraOnMap(); return; }
 }
 
 // creating map
@@ -848,112 +902,124 @@ void Game::centerCameraOnMap() {
 }
 
 void Game::renderSettingsPanel(int x, int y, int w, int h) {
-    // Background already drawn by renderPanel
+    int mouseX, mouseY;
+    SDL_GetMouseState(&mouseX, &mouseY);
 
-    int cy = y + 8; // current y cursor
+    auto hit = [&](const SDL_Rect& r) {
+        return mouseX >= r.x && mouseX < r.x + r.w &&
+               mouseY >= r.y && mouseY < r.y + r.h;
+    };
 
-    // ── Map info ──────────────────────────────────────────────────────────────
-    textRenderer.draw(renderer, "── Map ──", x + 6, cy, {140, 140, 160, 255});
+    auto drawButton = [&](const SDL_Rect& r, const std::string& label) {
+        bool hovered = hit(r);
+        SDL_SetRenderDrawColor(renderer,
+            hovered ? 92 : 64,
+            hovered ? 92 : 64,
+            hovered ? 92 : 64,
+            255);
+        SDL_RenderFillRect(renderer, &r);
+        SDL_SetRenderDrawColor(renderer,
+            hovered ? 235 : 120,
+            hovered ? 235 : 120,
+            hovered ? 235 : 120,
+            255);
+        SDL_RenderDrawRect(renderer, &r);
+        if (hovered) {
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 28);
+            SDL_RenderFillRect(renderer, &r);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        }
+        textRenderer.drawCentered(renderer, label, r, {245, 245, 245, 255});
+    };
+
+    int cy = y + 8;
+
+    textRenderer.draw(renderer, "-- Map --", x + 6, cy, {210, 210, 210, 255});
     cy += 18;
     textRenderer.draw(renderer,
         "Size: " + std::to_string(map.getWidth()) +
         " x "   + std::to_string(map.getHeight()) + " tiles",
-        x + 6, cy, {180, 180, 180, 255});
+        x + 6, cy, {185, 185, 185, 255});
     cy += 16;
     textRenderer.draw(renderer,
         "Tile: " + std::to_string(map.getTileSize()) + "px",
-        x + 6, cy, {180, 180, 180, 255});
+        x + 6, cy, {185, 185, 185, 255});
     cy += 24;
 
-    // ── Expand/shrink amount ──────────────────────────────────────────────────
-    textRenderer.draw(renderer, "── Resize ──", x + 6, cy, {140, 140, 160, 255});
+    textRenderer.draw(renderer, "-- Resize --", x + 6, cy, {210, 210, 210, 255});
     cy += 18;
-    textRenderer.draw(renderer, "Amount:", x + 6, cy + 4, {160, 160, 160, 255});
+    textRenderer.draw(renderer, "Amount:", x + 6, cy + 4, {180, 180, 180, 255});
 
     SDL_Rect amtField = {x + 65, cy, 50, 22};
+    bool fieldHovered = hit(amtField);
     SDL_SetRenderDrawColor(renderer,
-        expandInputFocused ? 40 : 25,
-        expandInputFocused ? 40 : 25,
-        expandInputFocused ? 60 : 25, 255);
+        expandInputFocused ? 55 : fieldHovered ? 48 : 34,
+        expandInputFocused ? 55 : fieldHovered ? 48 : 34,
+        expandInputFocused ? 55 : fieldHovered ? 48 : 34,
+        255);
     SDL_RenderFillRect(renderer, &amtField);
     SDL_SetRenderDrawColor(renderer,
-        expandInputFocused ? 100 : 70,
-        expandInputFocused ? 150 : 70,
-        expandInputFocused ? 255 : 70, 255);
+        expandInputFocused ? 235 : fieldHovered ? 180 : 105,
+        expandInputFocused ? 235 : fieldHovered ? 180 : 105,
+        expandInputFocused ? 235 : fieldHovered ? 180 : 105,
+        255);
     SDL_RenderDrawRect(renderer, &amtField);
     textRenderer.draw(renderer,
         expandAmountInput + (expandInputFocused ? "|" : ""),
-        amtField.x + 4, amtField.y + 4);
-    textRenderer.draw(renderer, "tiles", x + 120, cy + 4, {120, 120, 120, 255});
+        amtField.x + 4, amtField.y + 4, {245, 245, 245, 255});
+    textRenderer.draw(renderer, "tiles", x + 120, cy + 4, {145, 145, 145, 255});
     cy += 28;
 
-    // Direction buttons — expand
-    const int bw = (w - 16) / 2;
-    const int bh = 22;
+    const int pad = 6;
+    const int gap = 2;
+    const int bw  = (w - pad * 2 - gap) / 2;
+    const int bh  = 22;
 
-    // Expand buttons
-    textRenderer.draw(renderer, "Expand:", x + 6, cy, {140, 180, 140, 255});
+    textRenderer.draw(renderer, "Expand:", x + 6, cy, {200, 200, 200, 255});
     cy += 16;
 
-    SDL_Rect eTop    = {x + 6,      cy,      w - 12, bh};
-    SDL_SetRenderDrawColor(renderer, 50, 90, 50, 255);
-    SDL_RenderFillRect(renderer, &eTop);
-    textRenderer.drawCentered(renderer, "+ Top", eTop);
-    cy += bh + 2;
+    SDL_Rect eTop   = {x + pad, cy, w - pad * 2, bh};
+    drawButton(eTop, "+ Top");
+    cy += bh + gap;
 
-    SDL_Rect eLeft   = {x + 6,      cy, bw, bh};
-    SDL_Rect eRight  = {x + 6 + bw + 2, cy, bw, bh};
-    SDL_SetRenderDrawColor(renderer, 50, 90, 50, 255);
-    SDL_RenderFillRect(renderer, &eLeft);
-    SDL_RenderFillRect(renderer, &eRight);
-    textRenderer.drawCentered(renderer, "+ Left",  eLeft);
-    textRenderer.drawCentered(renderer, "+ Right", eRight);
-    cy += bh + 2;
+    SDL_Rect eLeft  = {x + pad, cy, bw, bh};
+    SDL_Rect eRight = {x + pad + bw + gap, cy, bw, bh};
+    drawButton(eLeft, "+ Left");
+    drawButton(eRight, "+ Right");
+    cy += bh + gap;
 
-    SDL_Rect eBot    = {x + 6,      cy, w - 12, bh};
-    SDL_SetRenderDrawColor(renderer, 50, 90, 50, 255);
-    SDL_RenderFillRect(renderer, &eBot);
-    textRenderer.drawCentered(renderer, "+ Bottom", eBot);
+    SDL_Rect eBot   = {x + pad, cy, w - pad * 2, bh};
+    drawButton(eBot, "+ Bottom");
     cy += bh + 8;
 
-    // Shrink buttons
-    textRenderer.draw(renderer, "Shrink:", x + 6, cy, {180, 100, 100, 255});
+    textRenderer.draw(renderer, "Shrink:", x + 6, cy, {200, 200, 200, 255});
     cy += 16;
 
-    SDL_Rect sTop   = {x + 6,         cy,      w - 12, bh};
-    SDL_SetRenderDrawColor(renderer, 90, 40, 40, 255);
-    SDL_RenderFillRect(renderer, &sTop);
-    textRenderer.drawCentered(renderer, "- Top", sTop);
-    cy += bh + 2;
+    SDL_Rect sTop   = {x + pad, cy, w - pad * 2, bh};
+    drawButton(sTop, "- Top");
+    cy += bh + gap;
 
-    SDL_Rect sLeft  = {x + 6,         cy, bw, bh};
-    SDL_Rect sRight = {x + 6 + bw + 2, cy, bw, bh};
-    SDL_SetRenderDrawColor(renderer, 90, 40, 40, 255);
-    SDL_RenderFillRect(renderer, &sLeft);
-    SDL_RenderFillRect(renderer, &sRight);
-    textRenderer.drawCentered(renderer, "- Left",  sLeft);
-    textRenderer.drawCentered(renderer, "- Right", sRight);
-    cy += bh + 2;
+    SDL_Rect sLeft  = {x + pad, cy, bw, bh};
+    SDL_Rect sRight = {x + pad + bw + gap, cy, bw, bh};
+    drawButton(sLeft, "- Left");
+    drawButton(sRight, "- Right");
+    cy += bh + gap;
 
-    SDL_Rect sBot   = {x + 6,         cy, w - 12, bh};
-    SDL_SetRenderDrawColor(renderer, 90, 40, 40, 255);
-    SDL_RenderFillRect(renderer, &sBot);
-    textRenderer.drawCentered(renderer, "- Bottom", sBot);
+    SDL_Rect sBot   = {x + pad, cy, w - pad * 2, bh};
+    drawButton(sBot, "- Bottom");
     cy += bh + 8;
 
-    // Center camera button
-    SDL_Rect centerBtn = {x + 6, cy, w - 12, bh};
-    SDL_SetRenderDrawColor(renderer, 60, 80, 120, 255);
-    SDL_RenderFillRect(renderer, &centerBtn);
-    textRenderer.drawCentered(renderer, "Center Camera", centerBtn);
+    SDL_Rect centerBtn = {x + pad, cy, w - pad * 2, bh};
+    drawButton(centerBtn, "Center Camera");
 }
 
 // ── paintTileAtMouse ─────────────────────────────────────────────────────────
 void Game::paintTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-    if (mx >= screenWidth - panelWidth) return;
-    if (my >= screenHeight - bottomBarHeight) return;
+    if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) return;
+    if (showBottomBar && my >= screenHeight - bottomBarHeight) return;
     if (my < menuBarHeight) return;
 
     // ✅ Check layer is not locked or hidden
@@ -994,8 +1060,8 @@ void Game::paintTileAtMouse() {
 void Game::eraseTileAtMouse() {
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-    if (mx >= screenWidth - panelWidth) return;
-    if (my >= screenHeight - bottomBarHeight) return;
+    if ((showTilePanel || showSettingsPanel) && mx >= screenWidth - panelWidth) return;
+    if (showBottomBar && my >= screenHeight - bottomBarHeight) return;
     if (my < menuBarHeight) return;
 
     if (layerStates[selectedLayer].locked) return;
@@ -1042,8 +1108,8 @@ void Game::render() {
     // Ghost preview
     int mx, my;
     SDL_GetMouseState(&mx, &my);
-    if (mx < screenWidth - panelWidth &&
-        !(my < menuBarHeight || my >= screenHeight - bottomBarHeight)) {
+    if ((!(showTilePanel || showSettingsPanel) || mx < screenWidth - panelWidth) &&
+        !(my < menuBarHeight || (showBottomBar && my >= screenHeight - bottomBarHeight))) {
         float worldX = camera.x + mx / camera.zoom;
         float worldY = camera.y + my / camera.zoom;
 
@@ -1065,7 +1131,8 @@ void Game::render() {
     }
 
     renderPanel();
-    renderBottomBar();
+    if (showBottomBar)
+        renderBottomBar();
 
     // Tileset editor BEFORE menu bar — so menu bar renders on top
     if (editorMode == EditorMode::TilesetEditor)
@@ -1073,7 +1140,8 @@ void Game::render() {
 
     // ✅ Menu bar always on top of everything except naming overlay
     menuBar.render(renderer, textRenderer, mapManager, tilesetManager, screenWidth);
-    toolbar.render(renderer, textRenderer, toolMode, toolbarStartX, screenWidth);
+    if (showToolbar)
+        toolbar.render(renderer, textRenderer, toolMode, toolbarStartX, screenWidth);
 
     // Map craetion  overlay on top of absolutely everything
     if (newMapDialog.active) {
@@ -1156,6 +1224,8 @@ void Game::render() {
 // ── renderPanel ──────────────────────────────────────────────────────────────
 
 void Game::renderPanel() {
+    if (!showTilePanel && !showSettingsPanel) return;
+
     const int px = screenWidth - panelWidth;
 
     // Background
@@ -1188,9 +1258,15 @@ void Game::renderPanel() {
 
     // Content area starts below toggle bar
     int contentY    = menuBarHeight + toggleH;
-    int contentH    = screenHeight - contentY - 42; // leave room for import buttons
+    int contentH    = screenHeight - contentY - (showTilePanel ? 42 : 2);
 
-    if (panelLayout == PanelLayout::TilesOnly) {
+    if (!showTilePanel) {
+        renderSettingsPanel(px, contentY, panelWidth, contentH);
+    }
+    else if (!showSettingsPanel) {
+        renderTilesPanelContent(px, contentY, panelWidth, contentH);
+    }
+    else if (panelLayout == PanelLayout::TilesOnly) {
         renderTilesPanelContent(px, contentY, panelWidth, contentH);
     }
     else if (panelLayout == PanelLayout::SettingsOnly) {
@@ -1206,6 +1282,8 @@ void Game::renderPanel() {
             renderTilesPanelContent(px, contentY + half, panelWidth, half);
         }
     }
+
+    if (!showTilePanel) return;
 
     // Import buttons (always visible, outside clip)
     const int btnY   = screenHeight - 38;
@@ -1313,8 +1391,11 @@ void Game::renderTilesPanelContent(int x, int y, int w, int h) {
 // ── renderBottomBar ──────────────────────────────────────────────────────────
 
 void Game::renderBottomBar() {
+    const int barWidth = (showTilePanel || showSettingsPanel)
+        ? screenWidth - panelWidth
+        : screenWidth;
     SDL_Rect bar = {0, screenHeight - bottomBarHeight,
-                    screenWidth - panelWidth, bottomBarHeight};
+                    barWidth, bottomBarHeight};
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
     SDL_RenderFillRect(renderer, &bar);
 
@@ -1364,10 +1445,10 @@ void Game::renderBottomBar() {
         ? SDL_Color{200, 200, 200, 255}
         : SDL_Color{60,  60,  60,  255};
     textRenderer.draw(renderer, "Ctrl+Z Undo",
-        screenWidth - panelWidth - 320,
+        barWidth - 320,
         screenHeight - bottomBarHeight + 42, undoColor);
     textRenderer.draw(renderer, "Ctrl+Y Redo",
-        screenWidth - panelWidth - 200,
+        barWidth - 200,
         screenHeight - bottomBarHeight + 42, redoColor);
 
     // Coordinates + zoom — unchanged from before
@@ -1380,15 +1461,15 @@ void Game::renderBottomBar() {
 
     textRenderer.draw(renderer,
         "px " + std::to_string((int)worldX) + ", " + std::to_string((int)worldY),
-        screenWidth - panelWidth - 320, screenHeight - bottomBarHeight + 8,
+        barWidth - 320, screenHeight - bottomBarHeight + 8,
         {140, 140, 140, 255});
     textRenderer.draw(renderer,
         "tile " + std::to_string(tileX) + ", " + std::to_string(tileY),
-        screenWidth - panelWidth - 320, screenHeight - bottomBarHeight + 24,
+        barWidth - 320, screenHeight - bottomBarHeight + 24,
         {160, 160, 160, 255});
     textRenderer.draw(renderer,
         "Zoom " + std::to_string((int)(camera.zoom * 100)) + "%",
-        screenWidth - panelWidth - 160, screenHeight - bottomBarHeight + 8,
+        barWidth - 160, screenHeight - bottomBarHeight + 8,
         {140, 140, 140, 255});
 }
 
