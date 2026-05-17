@@ -197,6 +197,8 @@ private:
     void update(float deltaTime);
     void render();
 
+    bool selectedHierarchyObjectIsMap() const;
+
     // paint mode
     void paintTileAtMouse();
     void eraseTileAtMouse();

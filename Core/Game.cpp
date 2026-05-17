@@ -69,11 +69,13 @@ bool Game::init() {
     // Load object definitions
     objectLibrary.load(OBJECTS_INDEX);
     if (objectLibrary.all().empty()) {
-        selectedObjectDefinition = objectLibrary.add(ObjectDefinitionType::MapObject);
+        selectedObjectDefinition = objectLibrary.add(ObjectType::Map);
         ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition);
         if (def) {
-            if (const MapEntry* active = mapManager.getActiveEntry())
-                def->mapPath = std::string("../Maps/") + active->file;
+            def->tileSize = map.getTileSize();
+            def->widthTiles = map.getWidth();
+            def->heightTiles = map.getHeight();
+            def->layerCount = Map::LAYER_COUNT;
             ObjectDefinitionLibrary::generateClassFiles(*def, GAMEOBJECTS_DIR);
         }
         objectLibrary.save(OBJECTS_INDEX);
@@ -634,14 +636,15 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
 
         // World
         if (!consumed && my > menuBarHeight) {
-            if (toolMode == ToolMode::Paint || toolMode == ToolMode::Eraser)
+            if (selectedHierarchyObjectIsMap() &&
+                (toolMode == ToolMode::Paint || toolMode == ToolMode::Eraser))
                 undoSystem.beginStroke(toolMode == ToolMode::Eraser);
 
             if (toolMode == ToolMode::Hand || keys[SDL_SCANCODE_SPACE]) {
                 dragging = true;
                 SDL_GetMouseState(&lastMouseX, &lastMouseY);
             } else if (toolMode == ToolMode::Eraser) {
-                eraseTileAtMouse();
+                if (selectedHierarchyObjectIsMap()) eraseTileAtMouse();
             } else {
                 float worldX = camera.x + mx / camera.zoom;
                 float worldY = camera.y + my / camera.zoom;
@@ -661,7 +664,7 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
                 }
                 if (!clickedObject) {
                     selectedObject = -1;
-                    paintTileAtMouse();
+                    if (selectedHierarchyObjectIsMap()) paintTileAtMouse();
                 }
             }
         }
@@ -674,9 +677,11 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
         if ((!(showTilePanel || showSettingsPanel) || mx < screenWidth - panelWidth) &&
             my > menuBarHeight &&
             (!showBottomBar || my < screenHeight - bottomBarHeight)) {
-            undoSystem.beginStroke(true);
-            eraseTileAtMouse();
-            undoSystem.endStroke();
+            if (selectedHierarchyObjectIsMap()) {
+                undoSystem.beginStroke(true);
+                if (selectedHierarchyObjectIsMap()) eraseTileAtMouse();
+                undoSystem.endStroke();
+            }
         }
     }
 
@@ -702,10 +707,10 @@ void Game::handlePaintModeEvents(const SDL_Event& e, const Uint8* keys) {
         if ((e.motion.state & SDL_BUTTON_LMASK) &&
             toolMode == ToolMode::Paint &&
             !keys[SDL_SCANCODE_SPACE])
-            paintTileAtMouse();
+            if (selectedHierarchyObjectIsMap()) paintTileAtMouse();
         if ((e.motion.state & SDL_BUTTON_LMASK) &&
             toolMode == ToolMode::Eraser)
-            eraseTileAtMouse();
+            if (selectedHierarchyObjectIsMap()) eraseTileAtMouse();
         if (e.motion.state & SDL_BUTTON_RMASK)
             eraseTileAtMouse();
     }
@@ -771,19 +776,21 @@ void Game::handleObjectPanelClick(int mx, int my) {
         return;
     }
 
-    ObjectDefinitionType type;
+    ObjectType type;
     bool create = true;
-    if (hit(mapBtn)) type = ObjectDefinitionType::MapObject;
-    else if (hit(charBtn)) type = ObjectDefinitionType::CharacterObject;
-    else if (hit(gameBtn)) type = ObjectDefinitionType::GameObject;
+    if (hit(mapBtn)) type = ObjectType::Map;
+    else if (hit(charBtn)) type = ObjectType::Character;
+    else if (hit(gameBtn)) type = ObjectType::Sprite;
     else create = false;
 
     if (create) {
         selectedObjectDefinition = objectLibrary.add(type);
         if (ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition)) {
-            if (type == ObjectDefinitionType::MapObject) {
-                if (const MapEntry* active = mapManager.getActiveEntry())
-                    def->mapPath = std::string("../Maps/") + active->file;
+            if (type == ObjectType::Map) {
+                def->tileSize = map.getTileSize();
+                def->widthTiles = map.getWidth();
+                def->heightTiles = map.getHeight();
+                def->layerCount = Map::LAYER_COUNT;
             }
             ObjectDefinitionLibrary::generateClassFiles(*def, GAMEOBJECTS_DIR);
         }
@@ -1013,8 +1020,11 @@ void Game::renderObjectPropertiesPanel(int x, int y, int w, int h) {
         textRenderer.draw(renderer, "Name: " + def->name, x + 6, cy, {200, 200, 200, 255}); cy += 16;
         textRenderer.draw(renderer, "Type: " + ObjectDefinitionLibrary::typeName(def->type), x + 6, cy, {200, 200, 200, 255}); cy += 16;
         textRenderer.draw(renderer, "Class: " + def->className, x + 6, cy, {200, 200, 200, 255}); cy += 16;
-        if (def->type == ObjectDefinitionType::MapObject)
-            textRenderer.draw(renderer, "Map: " + std::filesystem::path(def->mapPath).filename().string(), x + 6, cy, {170, 170, 170, 255});
+        if (def->type == ObjectType::Map)
+            textRenderer.draw(renderer,
+                "Map: " + std::to_string(def->widthTiles) + " x " +
+                std::to_string(def->heightTiles) + " @ " + std::to_string(def->tileSize) + "px",
+                x + 6, cy, {170, 170, 170, 255});
         else
             textRenderer.draw(renderer, "Sprite: " + std::filesystem::path(def->spritePath).filename().string(), x + 6, cy, {170, 170, 170, 255});
         return;
@@ -1359,8 +1369,15 @@ void Game::renderSettingsPanel(int x, int y, int w, int h) {
     drawButton(centerBtn, "Center Camera");
 }
 
+bool Game::selectedHierarchyObjectIsMap() const {
+    const ObjectDefinition* def = objectLibrary.get(selectedObjectDefinition);
+    return def && def->type == ObjectType::Map;
+}
+
 // ── paintTileAtMouse ─────────────────────────────────────────────────────────
 void Game::paintTileAtMouse() {
+    if (!selectedHierarchyObjectIsMap()) return;
+
     int mx, my;
     SDL_GetMouseState(&mx, &my);
     if (mx < objectPanelWidth) return;
@@ -1415,6 +1432,8 @@ void Game::paintTileAtMouse() {
 
 //method for erasing
 void Game::eraseTileAtMouse() {
+    if (!selectedHierarchyObjectIsMap()) return;
+
     int mx, my;
     SDL_GetMouseState(&mx, &my);
     if (mx < objectPanelWidth) return;
@@ -1591,7 +1610,7 @@ void Game::renderObjectPanel() {
     SDL_RenderDrawLine(renderer, objectPanelWidth - 1, menuBarHeight, objectPanelWidth - 1, screenHeight);
 
     int cy = menuBarHeight + 8;
-    textRenderer.draw(renderer, "Object Library", 8, cy, {230, 230, 230, 255});
+    textRenderer.draw(renderer, "Scene Hierarchy", 8, cy, {230, 230, 230, 255});
     cy += 26;
 
     const int rowH = 28;
@@ -1612,7 +1631,7 @@ void Game::renderObjectPanel() {
         SDL_RenderFillRect(renderer, &row);
         SDL_SetRenderDrawColor(renderer, selected ? 220 : 90, selected ? 220 : 90, selected ? 220 : 90, 255);
         SDL_RenderDrawRect(renderer, &row);
-        textRenderer.draw(renderer, defs[i].name, row.x + 6, row.y + 4, {235, 235, 235, 255});
+        textRenderer.draw(renderer, "  " + defs[i].name, row.x + 6, row.y + 4, {235, 235, 235, 255});
         textRenderer.draw(renderer, ObjectDefinitionLibrary::typeName(defs[i].type),
             row.x + 108, row.y + 4, {160, 160, 160, 255});
     }
@@ -1624,7 +1643,7 @@ void Game::renderObjectPanel() {
     struct Button { SDL_Rect r; const char* label; } buttons[] = {
         {{4, btnY, btnW, btnH}, "+Map"},
         {{6 + btnW, btnY, btnW, btnH}, "+Char"},
-        {{8 + btnW * 2, btnY, btnW, btnH}, "+Game"},
+        {{8 + btnW * 2, btnY, btnW, btnH}, "+Sprite"},
     };
 
     int mx, my;
@@ -1741,6 +1760,13 @@ void Game::renderPanel() {
 
 void Game::renderTilesPanelContent(int x, int y, int w, int h) {
     const int px = x;
+    if (!selectedHierarchyObjectIsMap()) {
+        SDL_Rect disabled = {x, y, w, h};
+        SDL_SetRenderDrawColor(renderer, 32, 32, 32, 255);
+        SDL_RenderFillRect(renderer, &disabled);
+        textRenderer.draw(renderer, "Select a Map object", x + 12, y + 14, {150, 150, 150, 255});
+        return;
+    }
 
     // Tab bar at top of this content area
     const char* tabNames[] = {"Terrain", "Object", "Deco", "Resource"};
